@@ -101,6 +101,13 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
         }
     }
 
+    public func load(_ item: EngineItem, at offset: TimeInterval) {
+        queue.async { [self] in
+            nextItem = nil
+            start(item, at: offset, emit: nil, autoplay: false)
+        }
+    }
+
     public func setNext(_ item: EngineItem?) {
         queue.async { [self] in
             guard let last = segments.last else { return }
@@ -232,7 +239,7 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
 
     // MARK: Scheduling
 
-    private func start(_ item: EngineItem, at offset: TimeInterval, emit event: EngineEvent?) {
+    private func start(_ item: EngineItem, at offset: TimeInterval, emit event: EngineEvent?, autoplay: Bool = true) {
         reset()
         let source: PCMSource
         do {
@@ -250,9 +257,14 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
         fill()
         do {
             try startEngineIfNeeded()
-            try node.playAudio()
-            setPlaying(true)
             startPolling()
+            if autoplay {
+                try node.playAudio()
+                setPlaying(true)
+            } else {
+                pausedPosition = offset
+                setPlaying(false)
+            }
             if let event { emit(event) }
         } catch {
             emit(.failed(id: item.id, message: error.localizedDescription))

@@ -38,19 +38,28 @@ struct AppShell: View {
         .tabViewStyle(.sidebarAdaptable)
         #if os(iOS)
         .tabViewBottomAccessory {
-            MiniPlayer(showNowPlaying: $showNowPlaying)
+            if app.remote.isControllingRemote { RemoteMiniPlayer(showNowPlaying: $showNowPlaying) }
+            else { MiniPlayer(showNowPlaying: $showNowPlaying) }
         }
-        .fullScreenCover(isPresented: $showNowPlaying) { NowPlayingView() }
+        .fullScreenCover(isPresented: $showNowPlaying) {
+            if app.remote.isControllingRemote { RemoteNowPlayingView() } else { NowPlayingView() }
+        }
         #else
         .safeAreaInset(edge: .bottom) {
-            if app.player.nowPlaying != nil {
-                MiniPlayer(showNowPlaying: $showNowPlaying)
+            if app.player.nowPlaying != nil || app.remote.isControllingRemote {
+                Group {
+                    if app.remote.isControllingRemote { RemoteMiniPlayer(showNowPlaying: $showNowPlaying) }
+                    else { MiniPlayer(showNowPlaying: $showNowPlaying) }
+                }
                     .padding(.vertical, 8)
                     .glassEffect(.regular, in: .rect(cornerRadius: 14))
                     .padding(10)
             }
         }
-        .sheet(isPresented: $showNowPlaying) { NowPlayingView().frame(minWidth: 480, minHeight: 720) }
+        .sheet(isPresented: $showNowPlaying) {
+            Group { if app.remote.isControllingRemote { RemoteNowPlayingView() } else { NowPlayingView() } }
+                .frame(minWidth: 480, minHeight: 720)
+        }
         #endif
     }
 

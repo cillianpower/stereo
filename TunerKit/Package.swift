@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "TunerDiscovery", targets: ["TunerDiscovery"]),
         .library(name: "TunerUI", targets: ["TunerUI"]),
         .library(name: "TunerSync", targets: ["TunerSync"]),
+        .library(name: "TunerRemote", targets: ["TunerRemote"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
@@ -31,11 +32,12 @@ let package = Package(
         .target(name: "TunerDownloads", dependencies: ["TunerModel", "TunerStore", "SubsonicClient"]),
         .target(name: "TunerDiscovery", dependencies: ["TunerModel", "TunerStore", "SubsonicClient"]),
         .target(name: "TunerSync", dependencies: ["TunerModel", "TunerStore"]),
+        .target(name: "TunerRemote", dependencies: ["TunerModel"]),
         .target(
             name: "TunerUI",
             dependencies: [
                 "TunerModel", "SubsonicClient", "RadioBrowserClient", "TunerStore",
-                "TunerPlayback", "TunerRadio", "TunerSystem", "TunerDownloads", "TunerDiscovery", "TunerSync",
+                "TunerPlayback", "TunerRadio", "TunerSystem", "TunerDownloads", "TunerDiscovery", "TunerSync", "TunerRemote",
             ]
         ),
 
@@ -48,6 +50,7 @@ let package = Package(
         .testTarget(name: "TunerDownloadsTests", dependencies: ["TunerDownloads", "TunerStore", "SubsonicClient"]),
         .testTarget(name: "TunerDiscoveryTests", dependencies: ["TunerDiscovery"], resources: [.copy("Fixtures")]),
         .testTarget(name: "TunerSyncTests", dependencies: ["TunerSync", "TunerStore"]),
+        .testTarget(name: "TunerRemoteTests", dependencies: ["TunerRemote"]),
         // Runs against a real Navidrome. Skipped unless TUNER_IT_URL is set (see Tests/IntegrationTests).
         .testTarget(name: "IntegrationTests", dependencies: ["SubsonicClient", "TunerStore", "TunerPlayback"]),
     ],

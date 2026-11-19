@@ -90,6 +90,8 @@ public protocol PlaybackEngine: AnyObject, Sendable {
 
     /// Starts `item` immediately (replacing anything playing) at `offset` seconds.
     func play(_ item: EngineItem, at offset: TimeInterval)
+    /// Loads `item` at `offset` and starts decoding, but stays paused until `resume()`.
+    func load(_ item: EngineItem, at offset: TimeInterval)
     /// Sets the item to play straight after the current one, without a gap.
     /// Ignored if the engine has already started decoding a different next item.
     func setNext(_ item: EngineItem?)

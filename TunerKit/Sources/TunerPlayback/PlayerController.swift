@@ -140,6 +140,22 @@ public final class PlayerController {
 
     public func setShuffle(_ on: Bool) { queue.setShuffle(on); refreshNext() }
 
+    public func setRepeat(_ mode: RepeatMode) {
+        queue.repeatMode = mode
+        refreshNext()
+    }
+
+    /// Loads a queue paused at an exact position and returns once the engine has the track —
+    /// used as the target side of a handoff, so nothing is heard until `resume()`.
+    public func prepare(_ tracks: [Track], startAt index: Int, position: TimeInterval, upNext: [Track] = [],
+                        shuffled: Bool = false, repeatMode: RepeatMode = .off, context: QueueContext? = nil) async throws {
+        stopRadio(clearParked: true)
+        queue.replace(with: tracks, startAt: index, source: context, shuffled: shuffled)
+        queue.repeatMode = repeatMode
+        if !upNext.isEmpty { queue.addToQueue(upNext) }
+        try await loadCurrent(at: position, autoplay: false)
+    }
+
     public func cycleRepeat() {
         switch queue.repeatMode {
         case .off: queue.repeatMode = .all
@@ -153,7 +169,8 @@ public final class PlayerController {
     public func restore(_ saved: SavedPlayQueue, autoplay: Bool) {
         let index = saved.current.flatMap { id in saved.tracks.firstIndex { $0.id == id } } ?? 0
         queue.replace(with: saved.tracks, startAt: index)
-        startCurrent(at: Double(saved.position.components.seconds), autoplay: autoplay)
+        let seconds = Double(saved.position.components.seconds) + Double(saved.position.components.attoseconds) / 1e18
+        startCurrent(at: seconds, autoplay: autoplay)
     }
 
     // MARK: Radio
@@ -211,6 +228,22 @@ public final class PlayerController {
     // MARK: Internals
 
     private func startCurrent(at offset: TimeInterval = 0, autoplay: Bool = true) {
+        Task {
+            do {
+                try await loadCurrent(at: offset, autoplay: autoplay)
+            } catch is CancellationError {
+                // superseded by a newer play request
+            } catch {
+                log.error("resolve failed: \(error.localizedDescription)")
+                lastError = error.localizedDescription
+                // Skip unplayable tracks rather than stopping the queue.
+                if queue.advance(userInitiated: true) != nil { startCurrent() } else { finish() }
+            }
+        }
+    }
+
+    /// Resolves the current track and hands it to the engine (playing, or loaded paused).
+    private func loadCurrent(at offset: TimeInterval, autoplay: Bool) async throws {
         guard let track = queue.current else { finish(); return }
         playToken += 1
         let token = playToken
@@ -221,24 +254,18 @@ public final class PlayerController {
         scheduledNextID = nil
         lastError = nil
 
-        Task {
-            do {
-                let item = try await engineItem(for: track)
-                guard token == playToken else { return }
-                engine.play(item, at: offset)
-                if !autoplay { engine.pause(); status = .paused }
-                startPositionUpdates()
-                report(.nowPlaying(track.id))
-                refreshNext()
-                schedulePrefetch()
-            } catch {
-                guard token == playToken else { return }
-                log.error("resolve failed: \(error.localizedDescription)")
-                lastError = error.localizedDescription
-                // Skip unplayable tracks rather than stopping the queue.
-                if queue.advance(userInitiated: true) != nil { startCurrent() } else { finish() }
-            }
+        let item = try await engineItem(for: track)
+        guard token == playToken else { throw CancellationError() }
+        if autoplay {
+            engine.play(item, at: offset)
+        } else {
+            engine.load(item, at: offset)
+            status = .paused
         }
+        startPositionUpdates()
+        if autoplay { report(.nowPlaying(track.id)) }
+        refreshNext()
+        schedulePrefetch()
     }
 
     /// Resolves and hands the engine the next track so the transition is gapless.
