@@ -3,72 +3,7 @@ import SwiftUI
 import TunerModel
 import TunerRadio
 
-// MARK: Home
-
-struct HomeView: View {
-    @Environment(AppModel.self) private var app
-    @State private var recentlyPlayed: [Album] = []
-    @State private var recentlyAdded: [Album] = []
-    @State private var mostPlayed: [Album] = []
-    @State private var rediscover: [Album] = []
-    @State private var stations: [Station] = []
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                if let error = app.syncError, recentlyAdded.isEmpty {
-                    ContentUnavailableView("Can't Reach Server", systemImage: "wifi.exclamationmark", description: Text(error))
-                }
-                if !recentlyPlayed.isEmpty {
-                    Shelf(title: "Recently Played") { ForEach(recentlyPlayed) { AlbumCard(album: $0, width: 160) } }
-                }
-                if !stations.isEmpty {
-                    Shelf(title: "Your Stations") {
-                        ForEach(stations) { station in
-                            Button { app.player.play(station) } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    ArtworkView(.station(station), cornerRadius: 12)
-                                    Text(station.name).font(.subheadline).lineLimit(1)
-                                }
-                                .frame(width: 120)
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu { StationMenu(station: station) }
-                        }
-                    }
-                }
-                if !rediscover.isEmpty {
-                    Shelf(title: "Rediscover") { ForEach(rediscover) { AlbumCard(album: $0, width: 160) } }
-                }
-                if !mostPlayed.isEmpty {
-                    Shelf(title: "Heavy Rotation") { ForEach(mostPlayed) { AlbumCard(album: $0, width: 160) } }
-                }
-                if !recentlyAdded.isEmpty {
-                    Shelf(title: "Recently Added") { ForEach(recentlyAdded) { AlbumCard(album: $0, width: 160) } }
-                }
-            }
-            .padding(.vertical)
-        }
-        .navigationTitle("Home")
-        .overlay {
-            if recentlyAdded.isEmpty, app.syncError == nil {
-                ProgressView(app.syncProgress?.phase ?? "Loading…")
-            }
-        }
-        .refreshable { await app.sync(); await reloadServerShelves() }
-        .task { for await v in app.store.observeAlbums(sortedBy: .recentlyPlayed, limit: 20) { recentlyPlayed = v } }
-        .task { for await v in app.store.observeAlbums(sortedBy: .recentlyAdded, limit: 20) { recentlyAdded = v } }
-        .task { for await v in app.store.observeFavoriteStations() { stations = v } }
-        .task { await reloadServerShelves() }
-    }
-
-    private func reloadServerShelves() async {
-        rediscover = (try? app.store.rediscoverAlbums()) ?? []
-        if let lib = app.library {
-            mostPlayed = (try? await lib.albums(.frequent, page: PageRequest(size: 20)).items) ?? mostPlayed
-        }
-    }
-}
+// Home lives in Screens/Discovery/HomeView.swift (driven by TunerDiscovery.HomeFeed).
 
 // MARK: Search
 

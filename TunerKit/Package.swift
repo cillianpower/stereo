@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "TunerRadio", targets: ["TunerRadio"]),
         .library(name: "TunerSystem", targets: ["TunerSystem"]),
         .library(name: "TunerDownloads", targets: ["TunerDownloads"]),
+        .library(name: "TunerDiscovery", targets: ["TunerDiscovery"]),
         .library(name: "TunerUI", targets: ["TunerUI"]),
     ],
     dependencies: [
@@ -27,11 +28,12 @@ let package = Package(
         .target(name: "TunerRadio", dependencies: ["TunerModel", "RadioBrowserClient", "TunerPlayback"]),
         .target(name: "TunerSystem", dependencies: ["TunerModel", "TunerPlayback"]),
         .target(name: "TunerDownloads", dependencies: ["TunerModel", "TunerStore", "SubsonicClient"]),
+        .target(name: "TunerDiscovery", dependencies: ["TunerModel", "TunerStore", "SubsonicClient"]),
         .target(
             name: "TunerUI",
             dependencies: [
                 "TunerModel", "SubsonicClient", "RadioBrowserClient", "TunerStore",
-                "TunerPlayback", "TunerRadio", "TunerSystem", "TunerDownloads",
+                "TunerPlayback", "TunerRadio", "TunerSystem", "TunerDownloads", "TunerDiscovery",
             ]
         ),
 
@@ -42,6 +44,7 @@ let package = Package(
         .testTarget(name: "TunerPlaybackTests", dependencies: ["TunerPlayback"], resources: [.copy("Fixtures")]),
         .testTarget(name: "TunerRadioTests", dependencies: ["TunerRadio"]),
         .testTarget(name: "TunerDownloadsTests", dependencies: ["TunerDownloads", "TunerStore", "SubsonicClient"]),
+        .testTarget(name: "TunerDiscoveryTests", dependencies: ["TunerDiscovery"], resources: [.copy("Fixtures")]),
         // Runs against a real Navidrome. Skipped unless TUNER_IT_URL is set (see Tests/IntegrationTests).
         .testTarget(name: "IntegrationTests", dependencies: ["SubsonicClient", "TunerStore", "TunerPlayback"]),
     ],

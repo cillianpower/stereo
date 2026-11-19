@@ -207,6 +207,7 @@ struct SettingsView: View {
                     Stepper("\(settings.replayGainPreamp, specifier: "%+.0f") dB", value: $settings.replayGainPreamp, in: -6...12)
                 }
             }
+            DiscoverySettingsSection()
             Section("Storage") {
                 Stepper("Cache limit: \(settings.cacheLimitGB) GB", value: $settings.cacheLimitGB, in: 1...100)
             }

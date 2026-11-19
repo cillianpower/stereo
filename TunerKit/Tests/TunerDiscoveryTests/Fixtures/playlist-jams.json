@@ -1,0 +1,8 @@
+{"playlist": {"title": "Weekly Jams", "identifier": "https://listenbrainz.org/playlist/22222222-2222-4222-8222-222222222222", "track": [
+ {"title": "Roygbiv", "creator": "Boards of Canada", "album": "Music Has the Right to Children",
+  "identifier": ["https://musicbrainz.org/recording/aaaaaaaa-0000-4000-8000-000000000001"],
+  "extension": {"https://musicbrainz.org/doc/jspf#track": {"additional_metadata": {"artists": [{"artist_mbid": "69158f97-4c07-4c4e-baf8-4e4ab1ed666e", "artist_credit_name": "Boards of Canada"}]}}}},
+ {"title": "Strangers (Remastered)", "creator": "Portishead", "album": "Dummy",
+  "identifier": "https://musicbrainz.org/recording/bbbbbbbb-0000-4000-8000-000000000002"},
+ {"title": "Not In Library", "creator": "Nobody", "identifier": ["https://musicbrainz.org/recording/cccccccc-0000-4000-8000-000000000003"]}
+]}}

@@ -415,12 +415,5 @@ extension LibraryStore {
         }
     }
 
-    /// Tracks of a pinned album straight from the local index (offline-capable).
-    public func tracks(ids: [ItemID]) throws -> [Track] {
-        try db.read { db in
-            let rows = try TrackRecord.filter(ids.map(\.description).contains(Column("id"))).fetchAll(db)
-            let byID = Dictionary(rows.compactMap { r in r.model.map { ($0.id, $0) } }, uniquingKeysWith: { a, _ in a })
-            return ids.compactMap { byID[$0] }
-        }
-    }
+    // `tracks(ids:)` (order-preserving, offline) lives in DiscoveryQueries.swift.
 }

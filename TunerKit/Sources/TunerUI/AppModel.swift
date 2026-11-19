@@ -36,6 +36,8 @@ public final class AppModel {
     @ObservationIgnored public internal(set) var downloads: DownloadManager?
 
     @ObservationIgnored public private(set) var library: SubsonicLibrary?
+    /// ListenBrainz, Home feed and autoplay; see AppModel+Discovery.swift.
+    public internal(set) var discovery: DiscoveryServices?
     @ObservationIgnored private var syncer: LibrarySyncer?
     @ObservationIgnored private let enricher = NowPlayingEnricher()
     @ObservationIgnored private let prober = StreamProber()
@@ -127,6 +129,7 @@ public final class AppModel {
         library = nil
         syncer = nil
         server = nil
+        tearDownDiscovery()
         player.library = nil
         player.resolver = nil
         detachDownloads()
@@ -147,6 +150,7 @@ public final class AppModel {
             lock.withLock { $0 } ? cell : wifi
         }, pinned: downloads.pinnedLookup)
         syncer = LibrarySyncer(source: lib, store: store)
+        configureDiscovery(library: lib)
         phase = .ready
         Task { await sync() }
     }

@@ -42,6 +42,10 @@ public final class AppSettings {
     public var replayGainMode: ReplayGainMode { didSet { save(replayGainMode.rawValue, "replayGainMode") } }
     public var replayGainPreamp: Double { didSet { save(replayGainPreamp, "replayGainPreamp") } }
     public var cacheLimitGB: Int { didSet { save(cacheLimitGB, "cacheLimitGB") } }
+    /// Keep playing similar music when the queue ends.
+    public var autoplayEnabled: Bool { didSet { save(autoplayEnabled, "autoplayEnabled") } }
+    /// ListenBrainz user name for the stored token (the token itself lives in the Keychain).
+    public var listenBrainzUser: String? { didSet { defaults.set(listenBrainzUser, forKey: "listenBrainzUser") } }
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -50,6 +54,8 @@ public final class AppSettings {
         replayGainMode = defaults.string(forKey: "replayGainMode").flatMap(ReplayGainMode.init) ?? .auto
         replayGainPreamp = defaults.object(forKey: "replayGainPreamp") as? Double ?? 0
         cacheLimitGB = defaults.object(forKey: "cacheLimitGB") as? Int ?? 5
+        autoplayEnabled = defaults.object(forKey: "autoplayEnabled") as? Bool ?? true
+        listenBrainzUser = defaults.string(forKey: "listenBrainzUser")
     }
 
     public var replayGainSettings: ReplayGainSettings {
