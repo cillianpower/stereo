@@ -208,6 +208,7 @@ struct SettingsView: View {
                 }
             }
             DiscoverySettingsSection()
+            CloudSyncSection()
             Section("Storage") {
                 Stepper("Cache limit: \(settings.cacheLimitGB) GB", value: $settings.cacheLimitGB, in: 1...100)
             }

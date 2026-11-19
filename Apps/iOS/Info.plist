@@ -31,11 +31,14 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Tuner connects to your music server and to Tuner on your other devices over your local network.</string>
+	<key>TunerCloudKitContainer</key>
+	<string>iCloud.$(TUNER_BUNDLE_PREFIX)</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>remote-notification</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

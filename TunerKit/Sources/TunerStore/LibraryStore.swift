@@ -130,6 +130,7 @@ public final class LibraryStore: Sendable {
             }
         }
         registerDownloadMigrations(&m)
+        registerSyncMigrations(&m)
         return m
     }
 

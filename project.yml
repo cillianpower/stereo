@@ -37,12 +37,23 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(TUNER_BUNDLE_PREFIX)
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    # Declared as properties: XcodeGen rewrites the file from these on every `generate`.
+    entitlements:
+      path: Apps/iOS/Tuner.entitlements
+      properties:
+        com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.icloud-container-identifiers: [iCloud.$(TUNER_BUNDLE_PREFIX)]
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(TUNER_BUNDLE_PREFIX)
+        keychain-access-groups: [$(AppIdentifierPrefix)$(TUNER_BUNDLE_PREFIX)]
+        # CKSyncEngine is woken by silent pushes when another device changes something.
+        aps-environment: development
     info:
       path: Apps/iOS/Info.plist
       properties:
         CFBundleDisplayName: Tuner
+        TunerCloudKitContainer: iCloud.$(TUNER_BUNDLE_PREFIX)
         UILaunchScreen: {}
-        UIBackgroundModes: [audio]
+        UIBackgroundModes: [audio, remote-notification]
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad:
@@ -61,8 +72,22 @@ targets:
     dependencies:
       - package: TunerKit
         product: TunerUI
+    # Restricted iCloud entitlements need a provisioning profile (Xcode automatic signing). For an
+    # ad-hoc CLI build, pass an ABSOLUTE path (a relative one is resolved per package target):
+    #   CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS="$PWD/Apps/macOS/Tuner-Local.entitlements"
+    # (sandbox + network only); sync then reports "unavailable" instead of the build failing.
     entitlements:
       path: Apps/macOS/Tuner.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.network.server: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.icloud-container-identifiers: [iCloud.$(TUNER_BUNDLE_PREFIX)]
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(TUNER_BUNDLE_PREFIX)
+        keychain-access-groups: [$(AppIdentifierPrefix)$(TUNER_BUNDLE_PREFIX)]
+        com.apple.developer.aps-environment: development
     settings:
       base:
         PRODUCT_NAME: Tuner
@@ -72,6 +97,7 @@ targets:
       path: Apps/macOS/Info.plist
       properties:
         CFBundleDisplayName: Tuner
+        TunerCloudKitContainer: iCloud.$(TUNER_BUNDLE_PREFIX)
         LSApplicationCategoryType: public.app-category.music
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
