@@ -1,0 +1,46 @@
+Tuner is a SwiftUI Navidrome/Subsonic client for iOS, iPadOS, and macOS.
+
+it connects to a subsonic or navidrome server, radio-browser, and hopefully more, with a native, apple music-like UI.
+
+
+If the goal is fully open source + iOS-native:
+	1.	Flo – most Navidrome-focused project
+	2.	Agin Music – most features right now
+
+
+Navidrome GitHub:
+https://github.com/navidrome/navidrome
+
+
+Borrow useful features from here:
+https://github.com/aginrocks/agin-music-mobile
+
+Reimplement Spotify app features:
+Playback control of other networked devices
+Gestures
+Etc
+
+
+Flo:
+https://github.com/kepelet/flo
+
+(deleted flo off phone because navidrome on home server down. revisit when fixed)
+
+
+Musly (built in flutter, might have insights):
+https://github.com/dddevid/Musly
+
+
+Take inspiration from Plaidio (not OSS, but similar to what i want to do)
+
+
+Build targets:
+iOS
+	(android via skip.dev)
+MacOS
+Linux (appimage or flatpak, otherwise can package yourself)
+
+Windows (if I feel like it)
+
+
+swiftui/appkit/native iOS and macOS UI is a must

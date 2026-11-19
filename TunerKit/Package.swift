@@ -1,0 +1,46 @@
+// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: "TunerKit",
+    platforms: [.iOS("27.0"), .macOS("27.0"), .tvOS("27.0")],
+    products: [
+        .library(name: "TunerModel", targets: ["TunerModel"]),
+        .library(name: "SubsonicClient", targets: ["SubsonicClient"]),
+        .library(name: "RadioBrowserClient", targets: ["RadioBrowserClient"]),
+        .library(name: "TunerStore", targets: ["TunerStore"]),
+        .library(name: "TunerPlayback", targets: ["TunerPlayback"]),
+        .library(name: "TunerRadio", targets: ["TunerRadio"]),
+        .library(name: "TunerSystem", targets: ["TunerSystem"]),
+        .library(name: "TunerUI", targets: ["TunerUI"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
+    ],
+    targets: [
+        .target(name: "TunerModel"),
+        .target(name: "SubsonicClient", dependencies: ["TunerModel"]),
+        .target(name: "RadioBrowserClient", dependencies: ["TunerModel"]),
+        .target(name: "TunerStore", dependencies: ["TunerModel", .product(name: "GRDB", package: "GRDB.swift")]),
+        .target(name: "TunerPlayback", dependencies: ["TunerModel"]),
+        .target(name: "TunerRadio", dependencies: ["TunerModel", "RadioBrowserClient", "TunerPlayback"]),
+        .target(name: "TunerSystem", dependencies: ["TunerModel", "TunerPlayback"]),
+        .target(
+            name: "TunerUI",
+            dependencies: [
+                "TunerModel", "SubsonicClient", "RadioBrowserClient", "TunerStore",
+                "TunerPlayback", "TunerRadio", "TunerSystem",
+            ]
+        ),
+
+        .testTarget(name: "TunerModelTests", dependencies: ["TunerModel"]),
+        .testTarget(name: "SubsonicClientTests", dependencies: ["SubsonicClient"], resources: [.copy("Fixtures")]),
+        .testTarget(name: "RadioBrowserClientTests", dependencies: ["RadioBrowserClient"]),
+        .testTarget(name: "TunerStoreTests", dependencies: ["TunerStore"]),
+        .testTarget(name: "TunerPlaybackTests", dependencies: ["TunerPlayback"]),
+        .testTarget(name: "TunerRadioTests", dependencies: ["TunerRadio"]),
+        // Runs against a real Navidrome. Skipped unless TUNER_IT_URL is set (see Tests/IntegrationTests).
+        .testTarget(name: "IntegrationTests", dependencies: ["SubsonicClient", "TunerStore", "TunerPlayback"]),
+    ],
+    swiftLanguageModes: [.v6]
+)

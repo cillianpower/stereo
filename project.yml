@@ -1,0 +1,84 @@
+# Generates Tuner.xcodeproj: `xcodegen generate`. The .xcodeproj is a build artifact and is gitignored.
+name: Tuner
+options:
+  bundleIdPrefix: app.tuner
+  deploymentTarget:
+    iOS: "27.0"
+    macOS: "27.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+packages:
+  TunerKit:
+    path: TunerKit
+targets:
+  Tuner-iOS:
+    type: application
+    platform: iOS
+    sources:
+      - Apps/Shared
+      - Apps/iOS
+    dependencies:
+      - package: TunerKit
+        product: TunerUI
+    settings:
+      base:
+        PRODUCT_NAME: Tuner
+        PRODUCT_BUNDLE_IDENTIFIER: app.tuner.Tuner
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    info:
+      path: Apps/iOS/Info.plist
+      properties:
+        CFBundleDisplayName: Tuner
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        # Personal servers and many radio streams are plain HTTP on the LAN.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: Tuner connects to your music server and to Tuner on your other devices over your local network.
+        NSBonjourServices: [_tuner._tcp]
+  Tuner-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - Apps/Shared
+      - Apps/macOS
+    dependencies:
+      - package: TunerKit
+        product: TunerUI
+    entitlements:
+      path: Apps/macOS/Tuner.entitlements
+    settings:
+      base:
+        PRODUCT_NAME: Tuner
+        PRODUCT_BUNDLE_IDENTIFIER: app.tuner.Tuner
+        ENABLE_HARDENED_RUNTIME: YES
+    info:
+      path: Apps/macOS/Info.plist
+      properties:
+        CFBundleDisplayName: Tuner
+        LSApplicationCategoryType: public.app-category.music
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: Tuner connects to your music server and to Tuner on your other devices over your local network.
+        NSBonjourServices: [_tuner._tcp]
+schemes:
+  Tuner-iOS:
+    build:
+      targets: { Tuner-iOS: all }
+  Tuner-macOS:
+    build:
+      targets: { Tuner-macOS: all }

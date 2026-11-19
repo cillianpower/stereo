@@ -1,0 +1,4 @@
+{"subsonic-response":{"status":"ok","version":"1.16.1","type":"navidrome","serverVersion":"0.58.0","openSubsonic":true,"albumList2":{"album":[
+{"id":"al-1","name":"Music Has the Right to Children","artist":"Boards of Canada","artistId":"ar-1","coverArt":"al-1_0","songCount":18,"duration":4241,"playCount":12,"played":"2026-11-01T20:15:02.123Z","created":"2025-03-04T10:00:00Z","year":1998,"genre":"Electronic"},
+{"id":"al-2","name":"Selected Ambient Works 85-92","artist":"Aphex Twin","artistId":"ar-2","coverArt":"al-2_0","songCount":13,"duration":4500,"created":"2025-03-04T10:00:00Z","year":1992,"starred":"2026-01-02T03:04:05Z"}
+]}}}
