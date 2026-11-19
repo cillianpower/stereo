@@ -129,6 +129,7 @@ public final class LibraryStore: Sendable {
                 t.column("value", .text)
             }
         }
+        registerDownloadMigrations(&m)
         return m
     }
 
