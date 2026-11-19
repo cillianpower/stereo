@@ -130,6 +130,14 @@ struct AlbumDetailView: View {
     var body: some View {
         Group {
             if let detail {
+                #if os(macOS)
+                VStack(spacing: 0) {
+                    macHeader(detail)
+                    SongTable(tracks: detail.tracks, showNumber: true, showAlbum: false) { tracks, index in
+                        app.player.play(tracks, startAt: index, from: .album(albumID, name: detail.album.name))
+                    }
+                }
+                #else
                 List {
                     header(detail)
                         .listRowSeparator(.hidden)
@@ -149,6 +157,7 @@ struct AlbumDetailView: View {
                     footer(detail).listRowSeparator(.hidden)
                 }
                 .listStyle(.plain)
+                #endif
             } else if failed {
                 ContentUnavailableView("Album Unavailable", systemImage: "wifi.exclamationmark",
                                        description: Text("It isn't downloaded and the server can't be reached."))
@@ -210,6 +219,39 @@ struct AlbumDetailView: View {
         .padding(.horizontal)
         .padding(.bottom, 8)
     }
+
+    #if os(macOS)
+    /// Music.app-style album header: artwork left, details and actions right.
+    private func macHeader(_ d: AlbumDetail) -> some View {
+        HStack(alignment: .bottom, spacing: 20) {
+            ArtworkView(.coverArt(d.album.coverArtID), cornerRadius: 8, size: 200)
+                .shadow(color: .black.opacity(0.2), radius: 12, y: 6)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(d.album.name).font(.largeTitle.bold()).lineLimit(2)
+                if let artistID = d.album.artistID {
+                    NavigationLink(value: Route.artist(artistID)) {
+                        Text(d.album.artist ?? "").font(.title2).foregroundStyle(.tint)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text([d.album.genre, d.album.year.map(String.init), d.tracks.first.flatMap { Format.qualityBadge($0.format) },
+                      "\(d.tracks.count) songs", Format.longDuration(d.tracks.compactMap(\.duration).reduce(.zero, +))]
+                    .compactMap { $0 }.joined(separator: " · "))
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    Button { app.player.play(d.tracks, from: .album(albumID, name: d.album.name)) } label: { Label("Play", systemImage: "play.fill") }
+                        .buttonStyle(.borderedProminent)
+                    Button { app.player.play(d.tracks, from: .album(albumID, name: d.album.name), shuffled: true) } label: { Label("Shuffle", systemImage: "shuffle") }
+                        .buttonStyle(.bordered)
+                }
+                .controlSize(.large)
+                .padding(.top, 6)
+            }
+            Spacer()
+        }
+        .padding(20)
+    }
+    #endif
 
     private func footer(_ d: AlbumDetail) -> some View {
         let total = d.tracks.compactMap(\.duration).reduce(Duration.zero, +)
@@ -341,11 +383,19 @@ struct PlaylistDetailView: View {
                 .controlSize(.large)
                 .listRowSeparator(.hidden)
 
+                #if os(macOS)
+                SongTable(tracks: detail.tracks) { tracks, index in
+                    app.player.play(tracks, startAt: index, from: .playlist(playlistID, name: detail.playlist.name))
+                }
+                .frame(minHeight: 400)
+                .listRowInsets(.init())
+                #else
                 ForEach(Array(detail.tracks.enumerated()), id: \.offset) { index, track in
                     TrackRow(track: track, showArtwork: true) {
                         app.player.play(detail.tracks, startAt: index, from: .playlist(playlistID, name: detail.playlist.name))
                     }
                 }
+                #endif
             } else {
                 ProgressView()
             }
