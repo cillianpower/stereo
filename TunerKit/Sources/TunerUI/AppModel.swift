@@ -28,6 +28,10 @@ public final class AppModel {
     public private(set) var radioEnrichment: EnrichedTitle?
     public private(set) var radioLibraryMatch: Track?
 
+    /// Song identification (ShazamKit on the engine's own audio).
+    public internal(set) var identification: IdentificationState = .idle
+    @ObservationIgnored let songIdentifier = SongIdentifier()
+
     public let settings: AppSettings
     public let player: PlayerController
     public let store: LibraryStore

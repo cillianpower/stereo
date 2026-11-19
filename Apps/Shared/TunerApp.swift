@@ -3,6 +3,9 @@ import TunerUI
 
 @main
 struct TunerApp: App {
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #endif
     @State private var app = AppModel()
 
     var body: some Scene {

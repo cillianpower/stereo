@@ -33,7 +33,8 @@ func makeEngineSession(configuration: URLSessionConfiguration, delegate: URLSess
 ///
 /// Seeking past what has arrived restarts the download with `Range: bytes=N-` and writes at that
 /// offset; the file is only handed to the cache if every byte ends up covered.
-final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate {
+/// `@unchecked Sendable`: every property is confined to the engine queue (URLSession delivers there too).
+final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate, @unchecked Sendable {
     var onAvailable: (() -> Void)?
     /// Called once with the temp file when every byte has been downloaded.
     var onComplete: ((URL) -> Void)?
@@ -236,7 +237,8 @@ final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate {
 
 /// An endless Icecast/Shoutcast stream: ICY metadata is split out and reported, audio bytes are
 /// queued in memory (bounded) for the parser. Nothing touches disk.
-final class LiveByteSource: NSObject, ByteSource, URLSessionDataDelegate {
+/// `@unchecked Sendable`: confined to the engine queue, like `DownloadByteSource`.
+final class LiveByteSource: NSObject, ByteSource, URLSessionDataDelegate, @unchecked Sendable {
     var onAvailable: (() -> Void)?
     var onMetadata: (([String: String]) -> Void)?
     private(set) var error: Error?

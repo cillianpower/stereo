@@ -3,11 +3,14 @@ import AVFoundation
 
 /// Configures the shared audio session for long-form playback and maps interruptions and
 /// route changes onto the player.
+///
+/// iOS 27 splits interruptions into "the session became inactive" and a later "resumption
+/// recommendation"; we pause on the first and resume only when the system recommends it.
 @MainActor
 public final class AudioSessionCoordinator {
     private weak var player: PlayerController?
     private var observers: [NSObjectProtocol] = []
-    private var resumeAfterInterruption = false
+    private var resumeWhenRecommended = false
 
     public init(player: PlayerController) {
         self.player = player
@@ -15,11 +18,13 @@ public final class AudioSessionCoordinator {
         try? session.setCategory(.playback, mode: .default, policy: .longFormAudio)
 
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: .main) { [weak self] note in
-            let info = note.userInfo ?? [:]
-            let type = (info[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
-            let options = (info[AVAudioSessionInterruptionOptionKey] as? UInt).map(AVAudioSession.InterruptionOptions.init) ?? []
-            MainActor.assumeIsolated { self?.handleInterruption(type: type, options: options) }
+        observers.append(center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: session, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sessionBecameInactive() }
+        })
+        observers.append(center.addObserver(forName: AVAudioSession.resumptionRecommendationNotification, object: session, queue: .main) { [weak self] note in
+            let context = note.userInfo?[AVAudioSession.resumptionContextKey] as? AVAudioSession.ResumptionContext
+            let shouldResume = context?.recommendation == .shouldResume
+            MainActor.assumeIsolated { self?.resumptionRecommended(shouldResume) }
         })
         observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: .main) { [weak self] note in
             let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
@@ -35,21 +40,17 @@ public final class AudioSessionCoordinator {
         try? AVAudioSession.sharedInstance().setActive(true)
     }
 
-    private func handleInterruption(type: AVAudioSession.InterruptionType?, options: AVAudioSession.InterruptionOptions) {
+    private func sessionBecameInactive() {
         guard let player else { return }
-        switch type {
-        case .began:
-            resumeAfterInterruption = player.isPlaying
-            if player.isPlaying { player.pause() }
-        case .ended:
-            if resumeAfterInterruption, options.contains(.shouldResume) {
-                activate()
-                player.resume()
-            }
-            resumeAfterInterruption = false
-        default:
-            break
-        }
+        resumeWhenRecommended = player.isPlaying
+        if player.isPlaying { player.pause() }
+    }
+
+    private func resumptionRecommended(_ shouldResume: Bool) {
+        defer { resumeWhenRecommended = false }
+        guard resumeWhenRecommended, shouldResume, let player else { return }
+        activate()
+        player.resume()
     }
 }
 #endif

@@ -12,7 +12,7 @@ import os
 public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked Sendable {
     private struct Segment {
         let item: EngineItem
-        /// Frame (relative to the last `node.play()`) where this item's first sample sits.
+        /// Frame (relative to the last `try node.playAudio()`) where this item's first sample sits.
         var startFrame: AVAudioFramePosition
         /// Seconds into the item at which this segment began (non-zero after a seek).
         let itemOffset: TimeInterval
@@ -68,7 +68,11 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
         }
 
         engine.attach(node)
-        engine.connect(node, to: engine.mainMixerNode, format: format)
+        do {
+            try engine.connectNode(node, to: engine.mainMixerNode, format: format)
+        } catch {
+            Logger(subsystem: "app.tuner", category: "engine").fault("engine connect failed: \(error.localizedDescription)")
+        }
         engine.prepare()
 
         if !manualRendering {
@@ -130,7 +134,7 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
             }
             do {
                 try startEngineIfNeeded()
-                node.play()
+                try node.playAudio()
                 pausedPosition = nil
                 setPlaying(true)
             } catch {
@@ -179,8 +183,14 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
     public func installTap(_ handler: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void) {
         queue.async { [self] in
             if tapInstalled { engine.mainMixerNode.removeTap(onBus: 0) }
-            engine.mainMixerNode.installTap(onBus: 0, bufferSize: 8192, format: nil) { buffer, time in handler(buffer, time) }
-            tapInstalled = true
+            do {
+                try engine.mainMixerNode.installAudioTap(onBus: 0, bufferSize: 8192, format: nil) { buffer, time in
+                    handler(AVAudioPCMBuffer(copying: buffer), time)
+                }
+                tapInstalled = true
+            } catch {
+                log.error("tap failed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -240,7 +250,7 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
         fill()
         do {
             try startEngineIfNeeded()
-            node.play()
+            try node.playAudio()
             setPlaying(true)
             startPolling()
             if let event { emit(event) }
@@ -326,7 +336,7 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
 
     // MARK: Position
 
-    /// Frames rendered since the last `node.play()`.
+    /// Frames rendered since the last `try node.playAudio()`.
     private func renderedFrames() -> AVAudioFramePosition? {
         // playerTime(forNodeTime:) raises an Objective-C exception unless the engine is running.
         guard engine.isRunning, node.engine != nil, let nodeTime = node.lastRenderTime, nodeTime.isSampleTimeValid,

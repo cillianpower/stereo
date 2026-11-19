@@ -68,6 +68,22 @@ public protocol DownloadTransport: Sendable {
 
 /// `URLSession` transport built on the delegate API, so it works with background sessions
 /// (which reject the async convenience methods).
+/// Holds the completion handler iOS passes to the app delegate when it relaunches the app for
+/// background URLSession events. The transport calls it once all events have been delivered.
+public enum BackgroundSessionEvents {
+    nonisolated(unsafe) private static var handlers: [String: () -> Void] = [:]
+    private static let lock = NSLock()
+
+    public static func store(_ handler: @escaping () -> Void, for identifier: String) {
+        lock.withLock { handlers[identifier] = handler }
+    }
+
+    static func complete(_ identifier: String?) {
+        guard let identifier, let handler = lock.withLock({ handlers.removeValue(forKey: identifier) }) else { return }
+        DispatchQueue.main.async(execute: handler)
+    }
+}
+
 public final class URLSessionDownloadTransport: NSObject, DownloadTransport, URLSessionDownloadDelegate, @unchecked Sendable {
     private struct Pending {
         let continuation: CheckedContinuation<URL, Error>
@@ -172,6 +188,10 @@ public final class URLSessionDownloadTransport: NSObject, DownloadTransport, URL
                 orphans[tag] = outcome
             }
         }
+    }
+
+    public func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        BackgroundSessionEvents.complete(session.configuration.identifier)
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {

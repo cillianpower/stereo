@@ -115,6 +115,9 @@ struct RadioView: View {
             if !favorites.isEmpty {
                 Section("Favorites") { ForEach(favorites) { StationRow(station: $0) } }
             }
+            Section {
+                NavigationLink { IdentifiedSongsView() } label: { Label("Identified Songs", systemImage: "shazam.logo") }
+            }
             if !recents.isEmpty {
                 Section("Recently Played") { ForEach(recents) { StationRow(station: $0) } }
             }

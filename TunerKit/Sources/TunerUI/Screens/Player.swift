@@ -111,6 +111,8 @@ struct NowPlayingView: View {
                 .frame(maxHeight: .infinity)
 
                 titles
+                IdentificationBanner()
+                    .animation(.snappy, value: app.identification)
                 if case .track = player.nowPlaying { scrubber }
                 transport
                 bottomBar
@@ -256,6 +258,8 @@ struct NowPlayingView: View {
             if case .track = app.player.nowPlaying {
                 toggle(.lyrics, symbol: "quote.bubble")
             }
+            Spacer()
+            IdentifyButton()
             Spacer()
             #if os(iOS)
             RoutePickerButton().frame(width: 32, height: 32)
