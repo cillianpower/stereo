@@ -8,6 +8,7 @@ import TunerModel
 import TunerPlayback
 import TunerRadio
 import TunerStore
+import TunerSync
 import TunerSystem
 
 /// Composition root: builds every service once and exposes app-level actions to the views.
@@ -44,6 +45,10 @@ public final class AppModel {
     #if os(iOS) || os(tvOS)
     @ObservationIgnored private var audioSession: AudioSessionCoordinator?
     #endif
+    // iCloud sync of app-owned state (see AppModel+Sync.swift).
+    public internal(set) var cloudSyncStatus: SyncStatus = .notStarted
+    @ObservationIgnored var cloudSync: AppStateSync?
+    @ObservationIgnored var settingsMirror: SettingsMirror?
 
     private static let serverDefaultsKey = "server.v1"
 
@@ -76,6 +81,7 @@ public final class AppModel {
         }
         startNetworkMonitor()
         observeRadioTitles()
+        startAppStateSync()
     }
 
     // MARK: Session

@@ -57,4 +57,16 @@ public final class AppSettings {
     }
 
     private func save(_ value: Any, _ key: String) { defaults.set(value, forKey: key) }
+
+    /// Keys mirrored to iCloud. The cache limit stays per device: storage differs between devices.
+    public static let syncedKeys = ["wifiQuality", "cellularQuality", "replayGainMode", "replayGainPreamp"]
+
+    /// Re-reads values after iCloud changed them in UserDefaults underneath us.
+    public func reload() {
+        let fresh = AppSettings(defaults: defaults)
+        if wifiQuality != fresh.wifiQuality { wifiQuality = fresh.wifiQuality }
+        if cellularQuality != fresh.cellularQuality { cellularQuality = fresh.cellularQuality }
+        if replayGainMode != fresh.replayGainMode { replayGainMode = fresh.replayGainMode }
+        if replayGainPreamp != fresh.replayGainPreamp { replayGainPreamp = fresh.replayGainPreamp }
+    }
 }
