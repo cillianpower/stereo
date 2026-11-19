@@ -37,7 +37,7 @@ let package = Package(
         .testTarget(name: "SubsonicClientTests", dependencies: ["SubsonicClient"], resources: [.copy("Fixtures")]),
         .testTarget(name: "RadioBrowserClientTests", dependencies: ["RadioBrowserClient"]),
         .testTarget(name: "TunerStoreTests", dependencies: ["TunerStore"]),
-        .testTarget(name: "TunerPlaybackTests", dependencies: ["TunerPlayback"]),
+        .testTarget(name: "TunerPlaybackTests", dependencies: ["TunerPlayback"], resources: [.copy("Fixtures")]),
         .testTarget(name: "TunerRadioTests", dependencies: ["TunerRadio"]),
         // Runs against a real Navidrome. Skipped unless TUNER_IT_URL is set (see Tests/IntegrationTests).
         .testTarget(name: "IntegrationTests", dependencies: ["SubsonicClient", "TunerStore", "TunerPlayback"]),

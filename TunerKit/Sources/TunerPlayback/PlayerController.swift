@@ -3,8 +3,9 @@ import Observation
 import os
 import TunerModel
 
-/// The app's single player: owns the queue and drives the gapless engine (library) or the
-/// radio player (stations). UI, Now Playing and the future remote module all observe this.
+/// The app's single player: owns the queue and drives the gapless engine for library tracks and
+/// most radio, with AVPlayer for HLS stations (or any station the engine can't decode).
+/// UI, Now Playing and the remote module all observe this.
 @MainActor
 @Observable
 public final class PlayerController {
@@ -36,6 +37,10 @@ public final class PlayerController {
 
     // MARK: Dependencies
     @ObservationIgnored private let engine: PlaybackEngine
+    /// The engine, when it can share its PCM (ShazamKit, visualisers).
+    public var audioTap: AudioTapHost? { engine as? AudioTapHost }
+    /// True while the current station plays through the engine rather than AVPlayer.
+    @ObservationIgnored private var stationOnEngine = false
     @ObservationIgnored private let radio: RadioPlayer
     @ObservationIgnored public var resolver: TrackResolver?
     @ObservationIgnored public var library: LibrarySource?
@@ -53,6 +58,7 @@ public final class PlayerController {
     @ObservationIgnored private var positionTask: Task<Void, Never>?
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
     @ObservationIgnored private var pendingScrobbles: [(ItemID, Date)] = []
+    @ObservationIgnored private var prefetchTask: Task<Void, Never>?
 
     public init(engine: PlaybackEngine = AudioEnginePlayer(), radio: RadioPlayer = RadioPlayer()) {
         self.engine = engine
@@ -97,7 +103,7 @@ public final class PlayerController {
 
     public func pause() {
         switch nowPlaying {
-        case .station: radio.pause()
+        case .station: stationOnEngine ? engine.pause() : radio.pause()
         case .track: engine.pause()
         case nil: return
         }
@@ -106,7 +112,7 @@ public final class PlayerController {
 
     public func resume() {
         switch nowPlaying {
-        case .station: radio.resume()
+        case .station: stationOnEngine ? engine.resume() : radio.resume()
         case .track: engine.resume()
         case nil:
             if let parked = parkedQueue { queue = parked; parkedQueue = nil; startCurrent() }
@@ -153,19 +159,35 @@ public final class PlayerController {
     // MARK: Radio
 
     public func play(_ station: Station) {
-        if case .track = nowPlaying {
-            engine.pause()
-            parkedQueue = queue
-        }
-        engine.stop()
+        if case .track = nowPlaying { parkedQueue = queue }
+        radio.stop()
         playToken += 1
         nowPlaying = .station(station)
         streamTitle = nil
         position = 0
         status = .loading
+        lastError = nil
         stopPositionUpdates()
-        radio.play(station)
+        if station.isHLS {
+            stationOnEngine = false
+            engine.stop()
+            radio.play(station)
+        } else {
+            stationOnEngine = true
+            var request = URLRequest(url: station.streamURL)
+            request.setValue("Tuner", forHTTPHeaderField: "User-Agent")
+            engine.play(EngineItem(id: "station:\(station.id)#\(playToken)",
+                                   source: .stream(StreamSpec(request: request, typeHint: station.codec, isLive: true))), at: 0)
+        }
         onStationStarted?(station)
+    }
+
+    /// The engine couldn't decode this station (e.g. Ogg): let AVPlayer try.
+    private func fallBackToAVPlayer(_ station: Station) {
+        log.info("station falling back to AVPlayer: \(station.name)")
+        stationOnEngine = false
+        engine.stop()
+        radio.play(station)
     }
 
     public func stop() {
@@ -177,7 +199,12 @@ public final class PlayerController {
     }
 
     private func stopRadio(clearParked: Bool) {
-        if case .station = nowPlaying { radio.stop(); streamTitle = nil }
+        if case .station = nowPlaying {
+            radio.stop()
+            if stationOnEngine { engine.stop() }
+            stationOnEngine = false
+            streamTitle = nil
+        }
         if clearParked { parkedQueue = nil }
     }
 
@@ -203,6 +230,7 @@ public final class PlayerController {
                 startPositionUpdates()
                 report(.nowPlaying(track.id))
                 refreshNext()
+                schedulePrefetch()
             } catch {
                 guard token == playToken else { return }
                 log.error("resolve failed: \(error.localizedDescription)")
@@ -232,7 +260,7 @@ public final class PlayerController {
 
     private func engineItem(for track: Track) async throws -> EngineItem {
         guard let resolver else { throw URLError(.resourceUnavailable) }
-        let url = try await resolver.localFile(for: track)
+        let source = try await resolver.playbackSource(for: track)
         let albumContext: Bool
         if case .album(let id, _) = queue.contextSource, !queue.isShuffled, track.albumID == id { albumContext = true }
         else { albumContext = false }
@@ -241,30 +269,66 @@ public final class PlayerController {
         engineSerial += 1
         let id = "\(track.id)#\(engineSerial)"
         engineIDs[id] = track
-        return EngineItem(id: id, fileURL: url, gain: gain)
+        return EngineItem(id: id, source: source, gain: gain)
     }
 
     private func handleEngine(_ event: EngineEvent) {
-        guard case .track = nowPlaying else { return }
-        switch event {
-        case .started:
-            status = .playing
-        case .advanced(let id):
-            // Gapless transition: move the queue to match what is now audible.
-            guard let track = engineIDs[id] else { return }
-            if queue.peekNext?.id == track.id { queue.advance() }
-            nowPlaying = .track(track)
-            position = 0
-            scrobbled = false
-            report(.nowPlaying(track.id))
-            engineIDs = engineIDs.filter { $0.key == id }
-            refreshNext()
-        case .ended:
-            if queue.advance() != nil { startCurrent() } else { finish() }
-        case .failed(_, let message):
-            lastError = message
-        case .playingChanged(let playing):
-            if playing { status = .playing } else if status != .loading, nowPlaying != nil { status = .paused }
+        switch nowPlaying {
+        case .station(let station) where stationOnEngine:
+            switch event {
+            case .started, .playingChanged(true), .buffering(false): status = .playing
+            case .buffering(true): status = .buffering
+            case .playingChanged(false): if status != .loading { status = .paused }
+            case .streamMetadata(_, let title): streamTitle = StreamTitle(raw: title)
+            case .failed(let id, _):
+                guard id.hasSuffix("#\(playToken)") else { return }
+                fallBackToAVPlayer(station)
+            case .ended:
+                // A live stream ending means the connection dropped: reconnect once.
+                play(station)
+            case .advanced:
+                break
+            }
+        case .track:
+            switch event {
+            case .started:
+                status = .playing
+            case .advanced(let id):
+                // Gapless transition: move the queue to match what is now audible.
+                guard let track = engineIDs[id] else { return }
+                if queue.peekNext?.id == track.id { queue.advance() }
+                nowPlaying = .track(track)
+                position = 0
+                scrobbled = false
+                report(.nowPlaying(track.id))
+                engineIDs = engineIDs.filter { $0.key == id }
+                refreshNext()
+                schedulePrefetch()
+            case .ended:
+                if queue.advance() != nil { startCurrent() } else { finish() }
+            case .failed(_, let message):
+                lastError = message
+            case .playingChanged(let playing):
+                if playing { status = .playing } else if status != .loading, nowPlaying != nil { status = .paused }
+            case .buffering(let buffering):
+                if buffering { status = .buffering } else if status == .buffering { status = .playing }
+            case .streamMetadata:
+                break
+            }
+        default:
+            break
+        }
+    }
+
+    /// Fetches the next track into the cache a little after the current one starts, so the
+    /// gapless hand-off reads a local file even on slow networks.
+    private func schedulePrefetch() {
+        prefetchTask?.cancel()
+        guard let next = queue.peekNext, let resolver else { return }
+        prefetchTask = Task {
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled else { return }
+            await resolver.prefetch(next)
         }
     }
 

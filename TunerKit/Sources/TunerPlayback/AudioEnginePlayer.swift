@@ -3,17 +3,17 @@ import os
 
 /// Gapless player on AVAudioEngine.
 ///
-/// Every item is decoded into one fixed PCM format and its buffers go to a single
-/// `AVAudioPlayerNode`. When one file runs out, the next file's buffers are scheduled
-/// straight after, so the transition is sample-accurate. A position poll detects when
-/// playback crosses into the next item and reports `.advanced`.
+/// Every item, file or stream, is decoded into one fixed PCM format and its buffers go to a single
+/// `AVAudioPlayerNode`. When one item runs out, the next item's buffers are scheduled straight
+/// after, so the transition is sample-accurate. A position poll detects when playback crosses
+/// into the next item (`.advanced`) and when a stream underruns (`.buffering`).
 ///
 /// Every mutable property is touched only on `queue`.
-public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
+public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked Sendable {
     private struct Segment {
         let item: EngineItem
         /// Frame (relative to the last `node.play()`) where this item's first sample sits.
-        let startFrame: AVAudioFramePosition
+        var startFrame: AVAudioFramePosition
         /// Seconds into the item at which this segment began (non-zero after a seek).
         let itemOffset: TimeInterval
     }
@@ -23,8 +23,9 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
 
     let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
-    private let queue = DispatchQueue(label: "tuner.audio-engine", qos: .userInitiated)
+    let queue = DispatchQueue(label: "tuner.audio-engine", qos: .userInitiated)
     private let log = Logger(subsystem: "app.tuner", category: "engine")
+    private let streamConfiguration: URLSessionConfiguration
 
     let format: AVAudioFormat
     private let manualRendering: Bool
@@ -32,25 +33,30 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
     private let chunkFrames: AVAudioFrameCount
 
     private var segments: [Segment] = []
-    private var decoder: FileDecoder?
+    private var decoder: PCMSource?
     private var nextItem: EngineItem?
     private var scheduledFrames: AVAudioFramePosition = 0
     private var buffersInFlight = 0
     private var generation = 0
     private var audibleID: String?
     private var isPlaying = false
+    private var isBuffering = false
     private var endReported = false
     private var pausedPosition: TimeInterval?
     private var poll: DispatchSourceTimer?
     private var configObserver: NSObjectProtocol?
+    private var tapInstalled = false
 
     /// - Parameters:
     ///   - manualRenderingFormat: when set, the engine runs in offline manual-rendering mode (tests).
-    ///   - buffersAhead: how many ~0.19 s buffers to keep scheduled.
-    public init(manualRenderingFormat: AVAudioFormat? = nil, buffersAhead: Int = 16, chunkFrames: AVAudioFrameCount = 8192) {
+    ///   - buffersAhead: how many buffers (`chunkFrames` each) to keep scheduled; 32 × 8192 ≈ 5.5 s.
+    ///   - streamConfiguration: URLSession configuration for streams (tests inject stub protocols).
+    public init(manualRenderingFormat: AVAudioFormat? = nil, buffersAhead: Int = 32, chunkFrames: AVAudioFrameCount = 8192,
+                streamConfiguration: URLSessionConfiguration = .default) {
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         self.buffersAhead = buffersAhead
         self.chunkFrames = chunkFrames
+        self.streamConfiguration = streamConfiguration
         manualRendering = manualRenderingFormat != nil
 
         if let manualRenderingFormat {
@@ -77,6 +83,7 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
 
     deinit {
         poll?.cancel()
+        decoder?.cancel()
         if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
         continuation.finish()
     }
@@ -95,7 +102,7 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
             guard let last = segments.last else { return }
             if last.item.id == audibleID {
                 nextItem = item
-                // The current file may already be fully decoded; start the next one now.
+                // The current item may already be fully decoded; start the next one now.
                 if decoder == nil, let item { beginDecoding(item) }
                 fill()
             }
@@ -115,7 +122,12 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
 
     public func resume() {
         queue.async { [self] in
-            guard !isPlaying, !segments.isEmpty else { return }
+            guard !isPlaying, let seg = audibleSegment() else { return }
+            // Live radio can't continue from where it paused; rejoin the live edge.
+            if seg.item.isLive {
+                start(seg.item, at: 0, emit: nil)
+                return
+            }
             do {
                 try startEngineIfNeeded()
                 node.play()
@@ -133,13 +145,14 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
             nextItem = nil
             audibleID = nil
             pausedPosition = nil
+            setBuffering(false)
             setPlaying(false)
         }
     }
 
     public func seek(to seconds: TimeInterval) {
         queue.async { [self] in
-            guard let current = audibleSegment() else { return }
+            guard let current = audibleSegment(), !current.item.isLive else { return }
             let following = segments.drop { $0.item.id != current.item.id }.dropFirst().first?.item ?? nextItem
             let wasPlaying = isPlaying
             start(current.item, at: max(0, seconds), emit: nil)
@@ -161,17 +174,66 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
         set { engine.mainMixerNode.outputVolume = newValue }
     }
 
+    // MARK: AudioTapHost
+
+    public func installTap(_ handler: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void) {
+        queue.async { [self] in
+            if tapInstalled { engine.mainMixerNode.removeTap(onBus: 0) }
+            engine.mainMixerNode.installTap(onBus: 0, bufferSize: 8192, format: nil) { buffer, time in handler(buffer, time) }
+            tapInstalled = true
+        }
+    }
+
+    public func removeTap() {
+        queue.async { [self] in
+            guard tapInstalled else { return }
+            engine.mainMixerNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
+    }
+
+    // MARK: Sources
+
+    private func makeSource(_ item: EngineItem, at offset: TimeInterval) throws -> PCMSource {
+        switch item.source {
+        case .file(let url):
+            return try FileDecoder(item: item, url: url, outputFormat: format, startAt: offset, chunkFrames: chunkFrames)
+        case .stream(let spec):
+            // Already fully downloaded (by us earlier, or by a prefetch)? Play the file.
+            if !spec.isLive, let local = spec.completion.finalURL, FileManager.default.fileExists(atPath: local.path()) {
+                return try FileDecoder(item: item, url: local, outputFormat: format, startAt: offset, chunkFrames: chunkFrames)
+            }
+            let decoder = try StreamDecoder(item: item, spec: spec, outputFormat: format, startAt: offset,
+                                            queue: queue, configuration: streamConfiguration)
+            decoder.onMetadata = { [weak self] meta in
+                if let title = meta["StreamTitle"], !title.isEmpty { self?.emit(.streamMetadata(id: item.id, title: title)) }
+            }
+            return decoder
+        }
+    }
+
+    private func attach(_ source: PCMSource) {
+        let gen = generation
+        source.onReadable = { [weak self] in
+            guard let self, gen == self.generation else { return }
+            self.fill()
+        }
+    }
+
     // MARK: Scheduling
 
     private func start(_ item: EngineItem, at offset: TimeInterval, emit event: EngineEvent?) {
         reset()
+        let source: PCMSource
         do {
-            decoder = try FileDecoder(item: item, outputFormat: format, startAt: offset, chunkFrames: chunkFrames)
+            source = try makeSource(item, at: offset)
         } catch {
-            log.error("open failed \(item.fileURL.lastPathComponent): \(error)")
+            log.error("open failed: \(error.localizedDescription)")
             emit(.failed(id: item.id, message: error.localizedDescription))
             return
         }
+        decoder = source
+        attach(source)
         segments = [Segment(item: item, startFrame: 0, itemOffset: offset)]
         audibleID = item.id
         endReported = false
@@ -189,6 +251,7 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
 
     private func reset() {
         generation += 1
+        decoder?.cancel()
         node.stop()          // flushes buffers; their completions are ignored via `generation`
         decoder = nil
         segments = []
@@ -198,32 +261,41 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
 
     private func beginDecoding(_ item: EngineItem) {
         do {
-            decoder = try FileDecoder(item: item, outputFormat: format, chunkFrames: chunkFrames)
+            let source = try makeSource(item, at: 0)
+            decoder = source
+            attach(source)
             segments.append(Segment(item: item, startFrame: scheduledFrames, itemOffset: 0))
             endReported = false
         } catch {
-            log.error("next item open failed: \(error)")
+            log.error("next item open failed: \(error.localizedDescription)")
             emit(.failed(id: item.id, message: error.localizedDescription))
             decoder = nil
         }
         nextItem = nil
     }
 
-    /// Keeps `buffersAhead` buffers scheduled, moving on to `nextItem` when the current file ends.
+    /// Keeps `buffersAhead` buffers scheduled, moving on to `nextItem` when the current source ends.
     private func fill() {
         while buffersInFlight < buffersAhead {
             guard let decoder else { return }
             do {
-                if let buffer = try decoder.read(frames: chunkFrames) {
+                switch try decoder.read(frames: chunkFrames) {
+                case .buffer(let buffer):
                     schedule(buffer)
-                } else if let next = nextItem {
-                    beginDecoding(next)
-                } else {
-                    self.decoder = nil
-                    return
+                case .wait:
+                    return   // `onReadable` calls back in when more data arrives
+                case .end:
+                    if let next = nextItem {
+                        beginDecoding(next)
+                    } else {
+                        self.decoder = nil
+                        return
+                    }
                 }
             } catch {
+                log.error("decode failed: \(error.localizedDescription)")
                 emit(.failed(id: decoder.item.id, message: error.localizedDescription))
+                decoder.cancel()
                 self.decoder = nil
                 if let next = nextItem { beginDecoding(next) }
             }
@@ -231,8 +303,16 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
     }
 
     private func schedule(_ buffer: AVAudioPCMBuffer) {
+        // After an underrun the node kept counting frames through silence; realign so positions
+        // and segment boundaries stay correct for what comes next.
+        if let rendered = renderedFrames(), rendered > scheduledFrames, !segments.isEmpty {
+            let drift = rendered - scheduledFrames
+            scheduledFrames = rendered
+            segments[segments.count - 1].startFrame += drift
+        }
         buffersInFlight += 1
         scheduledFrames += AVAudioFramePosition(buffer.frameLength)
+        setBuffering(false)
         let gen = generation
         node.scheduleBuffer(buffer, completionCallbackType: .dataConsumed) { [weak self] _ in
             guard let self else { return }
@@ -248,7 +328,9 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
 
     /// Frames rendered since the last `node.play()`.
     private func renderedFrames() -> AVAudioFramePosition? {
-        guard let nodeTime = node.lastRenderTime, let playerTime = node.playerTime(forNodeTime: nodeTime) else { return nil }
+        // playerTime(forNodeTime:) raises an Objective-C exception unless the engine is running.
+        guard engine.isRunning, node.engine != nil, let nodeTime = node.lastRenderTime, nodeTime.isSampleTimeValid,
+              let playerTime = node.playerTime(forNodeTime: nodeTime) else { return nil }
         return playerTime.sampleTime
     }
 
@@ -260,7 +342,9 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
     private func position() -> TimeInterval {
         guard let seg = audibleSegment() else { return 0 }
         guard let frames = renderedFrames() else { return seg.itemOffset }
-        return seg.itemOffset + Double(max(0, frames - seg.startFrame)) / format.sampleRate
+        // Don't count silence during an underrun.
+        let effective = min(frames, scheduledFrames)
+        return seg.itemOffset + Double(max(0, effective - seg.startFrame)) / format.sampleRate
     }
 
     private func startPolling() {
@@ -272,18 +356,19 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
         poll = timer
     }
 
-    /// Detects boundary crossings and end of playback. Public for manual-rendering tests.
+    /// Detects boundary crossings, underruns and end of playback.
     func tick() {
         guard isPlaying, let frames = renderedFrames() else { return }
         if let seg = segments.last(where: { $0.startFrame <= frames }), seg.item.id != audibleID {
             audibleID = seg.item.id
-            // Drop segments that are fully in the past.
             if let idx = segments.firstIndex(where: { $0.item.id == seg.item.id }), idx > 0 {
                 segments.removeFirst(idx)
             }
             emit(.advanced(id: seg.item.id))
         }
-        if decoder == nil, nextItem == nil, !endReported, frames >= scheduledFrames, !segments.isEmpty {
+        let starved = frames >= scheduledFrames
+        if starved, decoder != nil { setBuffering(true) }
+        if decoder == nil, nextItem == nil, !endReported, starved, !segments.isEmpty {
             endReported = true
             node.stop()
             setPlaying(false)
@@ -293,6 +378,8 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
 
     /// Test hook: runs `tick()` on the engine queue.
     func tickSync() { queue.sync { tick() } }
+    /// Test hook: waits for queued engine work.
+    func drain() { queue.sync {} }
 
     // MARK: Engine lifecycle
 
@@ -307,7 +394,7 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
         let pos = pausedPosition ?? position()
         let wasPlaying = isPlaying
         let following = nextItem
-        start(seg.item, at: pos, emit: nil)
+        start(seg.item, at: seg.item.isLive ? 0 : pos, emit: nil)
         nextItem = following
         if !wasPlaying {
             node.pause()
@@ -321,6 +408,12 @@ public final class AudioEnginePlayer: PlaybackEngine, @unchecked Sendable {
         guard playing != isPlaying else { return }
         isPlaying = playing
         emit(.playingChanged(playing))
+    }
+
+    private func setBuffering(_ buffering: Bool) {
+        guard buffering != isBuffering else { return }
+        isBuffering = buffering
+        emit(.buffering(buffering))
     }
 
     private func emit(_ event: EngineEvent) { continuation.yield(event) }

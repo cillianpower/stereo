@@ -2,8 +2,11 @@ import CryptoKit
 import Foundation
 import TunerModel
 
-/// Turns a track into a local file the engine can play.
+/// Turns a track into something the engine can play.
 public protocol TrackResolver: Sendable {
+    /// A local file if one exists (pinned or cached), otherwise a stream that caches itself as it plays.
+    func playbackSource(for track: Track) async throws -> EngineItem.Source
+    /// Downloads fully (or returns the existing file).
     func localFile(for track: Track) async throws -> URL
     /// Starts fetching in the background so a later `localFile` returns instantly.
     func prefetch(_ track: Track) async
@@ -85,6 +88,8 @@ public actor LibraryTrackResolver: TrackResolver {
     private let quality: QualityProvider
     private let pinned: PinnedLookup
     private var inFlight: [String: Task<URL, Error>] = [:]
+    /// Shared with the engine so a stream and a prefetch of the same track agree on the final file.
+    private var completions: [String: StreamCompletion] = [:]
 
     public init(library: LibrarySource, cache: TrackCache, session: URLSession = .shared,
                 quality: @escaping QualityProvider, pinned: @escaping PinnedLookup = { _ in nil }) {
@@ -103,6 +108,29 @@ public actor LibraryTrackResolver: TrackResolver {
             // Navidrome sends AAC transcodes as raw ADTS, so the extension must say so.
             return ("\(track.id)|\(format)@\(rate)", format)
         }
+    }
+
+    public func playbackSource(for track: Track) async throws -> EngineItem.Source {
+        if let url = await pinned(track.id) { return .file(url) }
+        let q = quality()
+        let (key, ext) = Self.cacheKey(track: track, quality: q)
+        if let url = await cache.file(for: key, ext: ext) { return .file(url) }
+        let request = try await library.streamRequest(for: track.id, quality: q, offset: nil)
+        return .stream(StreamSpec(
+            request: request,
+            typeHint: ext,
+            expectedDuration: track.duration.map { TimeInterval($0.components.seconds) },
+            completion: completion(key: key, ext: ext)
+        ))
+    }
+
+    private func completion(key: String, ext: String) -> StreamCompletion {
+        if let existing = completions[key] { return existing }
+        let cache = self.cache
+        let c = StreamCompletion { tmp in try? await cache.store(tmp, key: key, ext: ext) }
+        if completions.count > 64 { completions.removeAll() }
+        completions[key] = c
+        return c
     }
 
     public func localFile(for track: Track) async throws -> URL {
@@ -126,6 +154,8 @@ public actor LibraryTrackResolver: TrackResolver {
     }
 
     public func prefetch(_ track: Track) async {
-        _ = try? await localFile(for: track)
+        guard let url = try? await localFile(for: track) else { return }
+        let (key, ext) = Self.cacheKey(track: track, quality: quality())
+        completion(key: key, ext: ext).finalURL = url
     }
 }

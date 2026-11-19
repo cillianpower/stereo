@@ -115,6 +115,46 @@ struct NavidromeIntegrationTests {
         #expect(step <= typical * 1.5)
     }
 
+    @Test func streamedFLACFromServerIsGaplessAndCachesItself() async throws {
+        let lib = makeLibrary()
+        let store = try LibraryStore.inMemory()
+        try await LibrarySyncer(source: lib, store: store).sync(force: true)
+        let sweep = try #require(try store.search("continuous sweep").albums.first)
+        let tracks = try #require(try store.album(sweep.id)).tracks
+
+        let cacheDir = FileManager.default.temporaryDirectory.appending(path: "tuner-it-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: cacheDir) }
+        let cache = TrackCache(directory: cacheDir)
+        let resolver = LibraryTrackResolver(library: lib, cache: cache, quality: { .original })
+        let s1 = try await resolver.playbackSource(for: tracks[2])
+        let s2 = try await resolver.playbackSource(for: tracks[3])
+        guard case .stream = s1, case .stream = s2 else { Issue.record("expected streams with an empty cache"); return }
+
+        let fmt = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+        let player = AudioEnginePlayer(manualRenderingFormat: fmt, buffersAhead: 1000, chunkFrames: 4096)
+        player.play(EngineItem(id: "3", source: s1), at: 0)
+        player.setNext(EngineItem(id: "4", source: s2))
+        try await Task.sleep(for: .seconds(1.5))   // offline rendering doesn't wait for the network
+        player.drain()
+
+        var rendered: [Float] = []
+        let out = AVAudioPCMBuffer(pcmFormat: player.engine.manualRenderingFormat, frameCapacity: 4096)!
+        while rendered.count < 2 * 12 * 44_100 {
+            guard try player.engine.renderOffline(4096, to: out) == .success else { break }
+            rendered += UnsafeBufferPointer(start: out.floatChannelData![0], count: Int(out.frameLength))
+        }
+        let boundary = 12 * 44_100
+        let step = abs(rendered[boundary] - rendered[boundary - 1])
+        let typical = (1..<2000).map { abs(rendered[$0] - rendered[$0 - 1]) }.max()!
+        #expect(rendered.count >= 2 * 12 * 44_100)
+        #expect(step <= typical * 1.5, "click/gap at streamed boundary: \(step) vs \(typical)")
+
+        // Both streams finished downloading, so they're now cache hits.
+        try await Task.sleep(for: .milliseconds(300))
+        if case .file = try await resolver.playbackSource(for: tracks[2]) {} else { Issue.record("track 3 not cached after streaming") }
+        if case .file = try await resolver.playbackSource(for: tracks[3]) {} else { Issue.record("track 4 not cached after streaming") }
+    }
+
     @Test func transcodedStreamDownloadsAndDecodes() async throws {
         let lib = makeLibrary()
         let album = try #require(try await lib.albums(.alphabeticalByName, page: .init()).items.first { $0.name == "Plain Tones" })

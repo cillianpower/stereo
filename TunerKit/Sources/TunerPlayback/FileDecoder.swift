@@ -4,7 +4,7 @@ import AVFoundation
 /// Reads a local audio file and converts it to the engine's fixed PCM format, applying gain.
 /// Every item reaches the player node in the same format, so buffers from consecutive
 /// tracks can be scheduled back to back with no gap.
-final class FileDecoder {
+final class FileDecoder: PCMSource {
     let item: EngineItem
     let outputFormat: AVAudioFormat
     private let file: AVAudioFile
@@ -12,14 +12,15 @@ final class FileDecoder {
     private let inputBuffer: AVAudioPCMBuffer
     private var inputExhausted = false
     private(set) var isFinished = false
+    var onReadable: (() -> Void)?   // files are always readable
 
     /// Duration of the file, in seconds.
     let duration: TimeInterval
 
-    init(item: EngineItem, outputFormat: AVAudioFormat, startAt seconds: TimeInterval = 0, chunkFrames: AVAudioFrameCount = 8192) throws {
+    init(item: EngineItem, url: URL, outputFormat: AVAudioFormat, startAt seconds: TimeInterval = 0, chunkFrames: AVAudioFrameCount = 8192) throws {
         self.item = item
         self.outputFormat = outputFormat
-        file = try AVAudioFile(forReading: item.fileURL, commonFormat: .pcmFormatFloat32, interleaved: false)
+        file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
         let inFormat = file.processingFormat
         duration = Double(file.length) / inFormat.sampleRate
 
@@ -42,8 +43,14 @@ final class FileDecoder {
         inputBuffer = AVAudioPCMBuffer(pcmFormat: inFormat, frameCapacity: chunkFrames)!
     }
 
+    func read(frames: AVAudioFrameCount) throws -> PCMRead {
+        try readBuffer(frames: frames).map(PCMRead.buffer) ?? .end
+    }
+
+    func cancel() {}
+
     /// Returns the next buffer in `outputFormat`, or nil once the file is exhausted.
-    func read(frames: AVAudioFrameCount) throws -> AVAudioPCMBuffer? {
+    func readBuffer(frames: AVAudioFrameCount) throws -> AVAudioPCMBuffer? {
         guard !isFinished else { return nil }
         let out: AVAudioPCMBuffer
         if let converter {
@@ -89,12 +96,16 @@ final class FileDecoder {
         return out
     }
 
-    private func applyGain(_ buffer: AVAudioPCMBuffer) {
-        guard item.gain != 1, let channels = buffer.floatChannelData else { return }
-        var gain = item.gain
-        let n = vDSP_Length(buffer.frameLength)
-        for ch in 0..<Int(buffer.format.channelCount) {
-            vDSP_vsmul(channels[ch], 1, &gain, channels[ch], 1, n)
+    private func applyGain(_ buffer: AVAudioPCMBuffer) { buffer.applyGain(item.gain) }
+}
+
+extension AVAudioPCMBuffer {
+    func applyGain(_ gain: Float) {
+        guard gain != 1, let channels = floatChannelData else { return }
+        var g = gain
+        let n = vDSP_Length(frameLength)
+        for ch in 0..<Int(format.channelCount) {
+            vDSP_vsmul(channels[ch], 1, &g, channels[ch], 1, n)
         }
     }
 }

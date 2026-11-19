@@ -7,3 +7,4 @@ DerivedData/
 TunerKit/.build/
 TunerKit/.swiftpm/
 /build/
+.claude/worktrees/
