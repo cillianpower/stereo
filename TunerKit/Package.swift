@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "TunerRadio", targets: ["TunerRadio"]),
         .library(name: "TunerSystem", targets: ["TunerSystem"]),
         .library(name: "TunerUI", targets: ["TunerUI"]),
+        .library(name: "TunerRemote", targets: ["TunerRemote"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
@@ -25,11 +26,12 @@ let package = Package(
         .target(name: "TunerPlayback", dependencies: ["TunerModel"]),
         .target(name: "TunerRadio", dependencies: ["TunerModel", "RadioBrowserClient", "TunerPlayback"]),
         .target(name: "TunerSystem", dependencies: ["TunerModel", "TunerPlayback"]),
+        .target(name: "TunerRemote", dependencies: ["TunerModel"]),
         .target(
             name: "TunerUI",
             dependencies: [
                 "TunerModel", "SubsonicClient", "RadioBrowserClient", "TunerStore",
-                "TunerPlayback", "TunerRadio", "TunerSystem",
+                "TunerPlayback", "TunerRadio", "TunerSystem", "TunerRemote",
             ]
         ),
 
@@ -39,6 +41,7 @@ let package = Package(
         .testTarget(name: "TunerStoreTests", dependencies: ["TunerStore"]),
         .testTarget(name: "TunerPlaybackTests", dependencies: ["TunerPlayback"]),
         .testTarget(name: "TunerRadioTests", dependencies: ["TunerRadio"]),
+        .testTarget(name: "TunerRemoteTests", dependencies: ["TunerRemote"]),
         // Runs against a real Navidrome. Skipped unless TUNER_IT_URL is set (see Tests/IntegrationTests).
         .testTarget(name: "IntegrationTests", dependencies: ["SubsonicClient", "TunerStore", "TunerPlayback"]),
     ],

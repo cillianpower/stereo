@@ -28,6 +28,8 @@ public final class AppModel {
 
     public let settings: AppSettings
     public let player: PlayerController
+    /// LAN handoff and remote control (TunerRemote).
+    public let remote: RemoteCoordinator
     public let store: LibraryStore
     public let radioBrowser: RadioBrowserClient
     public let artwork: ArtworkPipeline
@@ -54,6 +56,7 @@ public final class AppModel {
 
         settings = AppSettings()
         player = PlayerController()
+        remote = RemoteCoordinator(player: player)
         radioBrowser = RadioBrowserClient(userAgent: "Tuner/\(Bundle.main.shortVersion)")
         artwork = ArtworkPipeline(directory: caches.appending(path: "Artwork"))
         trackCache = TrackCache(directory: caches.appending(path: "Audio"),
@@ -119,6 +122,7 @@ public final class AppModel {
 
     public func signOut() {
         player.stop()
+        remote.stop()
         if let server { Keychain.delete(server.id.rawValue) }
         UserDefaults.standard.removeObject(forKey: Self.serverDefaultsKey)
         library = nil
@@ -143,6 +147,7 @@ public final class AppModel {
         })
         syncer = LibrarySyncer(source: lib, store: store)
         phase = .ready
+        remote.start(account: config.username)
         Task { await sync() }
     }
 

@@ -260,6 +260,7 @@ struct NowPlayingView: View {
             #if os(iOS)
             RoutePickerButton().frame(width: 32, height: 32)
             #endif
+            DevicesButton().padding(.horizontal, 12)
             Spacer()
             if case .track = app.player.nowPlaying {
                 toggle(.queue, symbol: "list.bullet")
