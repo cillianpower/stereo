@@ -42,6 +42,7 @@ struct LibraryView: View {
                 NavigationLink(value: Route.artists) { Label("Artists", systemImage: "music.microphone") }
                 NavigationLink(value: Route.albums) { Label("Albums", systemImage: "square.stack") }
                 NavigationLink(value: Route.favoriteSongs) { Label("Favorite Songs", systemImage: "star") }
+                NavigationLink { DownloadedView() } label: { Label("Downloaded", systemImage: "arrow.down.circle") }
             }
             .font(.title3)
 
@@ -160,6 +161,7 @@ struct AlbumDetailView: View {
         #endif
         .toolbar {
             if let detail {
+                DownloadButton(owner: .album(albumID))
                 Menu { AlbumMenu(album: detail.album) } label: { Image(systemName: "ellipsis") }
             }
         }
@@ -350,6 +352,7 @@ struct PlaylistDetailView: View {
         }
         .listStyle(.plain)
         .navigationTitle(detail?.playlist.name ?? "")
+        .toolbar { DownloadButton(owner: .playlist(playlistID)) }
         .task { detail = try? await app.library?.playlist(playlistID) }
     }
 }

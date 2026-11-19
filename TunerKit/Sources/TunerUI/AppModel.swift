@@ -4,6 +4,7 @@ import Observation
 import os
 import RadioBrowserClient
 import SubsonicClient
+import TunerDownloads
 import TunerModel
 import TunerPlayback
 import TunerRadio
@@ -31,6 +32,8 @@ public final class AppModel {
     public let store: LibraryStore
     public let radioBrowser: RadioBrowserClient
     public let artwork: ArtworkPipeline
+    /// Pinned offline downloads; created on first connect and kept across reconnects.
+    @ObservationIgnored public internal(set) var downloads: DownloadManager?
 
     @ObservationIgnored public private(set) var library: SubsonicLibrary?
     @ObservationIgnored private var syncer: LibrarySyncer?
@@ -126,6 +129,7 @@ public final class AppModel {
         server = nil
         player.library = nil
         player.resolver = nil
+        detachDownloads()
         phase = .signedOut
     }
 
@@ -138,9 +142,10 @@ public final class AppModel {
         let settings = settings
         // Read quality on the main actor once per resolve; settings are main-actor state.
         let wifi = settings.wifiQuality.quality, cell = settings.cellularQuality.quality
+        let downloads = attachDownloads(to: lib)
         player.resolver = LibraryTrackResolver(library: lib, cache: trackCache, quality: {
             lock.withLock { $0 } ? cell : wifi
-        })
+        }, pinned: downloads.pinnedLookup)
         syncer = LibrarySyncer(source: lib, store: store)
         phase = .ready
         Task { await sync() }
@@ -161,6 +166,7 @@ public final class AppModel {
             try await syncer.sync(force: full) { [weak self] progress in
                 Task { @MainActor in self?.syncProgress = progress }
             }
+            await downloads?.refreshPins()   // new tracks on pinned albums/playlists
         } catch {
             syncError = error.localizedDescription
             log.error("sync failed: \(error.localizedDescription)")
