@@ -41,6 +41,9 @@ public final class PlayerController {
     @ObservationIgnored public var library: LibrarySource?
     /// Called when a station starts, e.g. to record a click with Radio Browser.
     @ObservationIgnored public var onStationStarted: ((Station) -> Void)?
+    /// Called when the library queue runs out. Return tracks to keep playing (auto-continue /
+    /// smart shuffle), or an empty array to stop.
+    @ObservationIgnored public var onQueueExhausted: ((PlayQueue) async -> [Track])?
 
     @ObservationIgnored private let log = Logger(subsystem: "app.tuner", category: "player")
     @ObservationIgnored private var playToken = 0
@@ -277,6 +280,21 @@ public final class PlayerController {
     }
 
     private func finish() {
+        if let hook = onQueueExhausted, let last = queue.context.last {
+            let snapshot = queue
+            let token = playToken
+            Task {
+                let more = await hook(snapshot).filter { $0.id != last.id }
+                guard token == playToken, !more.isEmpty else { stopAtEnd(); return }
+                queue.replace(with: more, startAt: 0, source: snapshot.contextSource)
+                startCurrent()
+            }
+            return
+        }
+        stopAtEnd()
+    }
+
+    private func stopAtEnd() {
         engine.stop()
         status = .idle
         position = 0
