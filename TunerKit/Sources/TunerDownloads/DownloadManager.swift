@@ -176,7 +176,7 @@ public actor DownloadManager {
     public nonisolated func localFile(for trackID: ItemID) -> URL? {
         guard let relative = try? store.completedDownloadPath(trackID) else { return nil }
         let url = directory.appending(path: relative)
-        return FileManager.default.fileExists(atPath: url.path()) ? url : nil
+        return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
     }
 
     /// Plug into `LibraryTrackResolver(pinned:)`.

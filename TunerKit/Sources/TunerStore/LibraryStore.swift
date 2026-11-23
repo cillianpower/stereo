@@ -138,14 +138,14 @@ public final class LibraryStore: Sendable {
 
     public func upsert(albums: [Album], syncedAt: Date = Date()) throws {
         try db.write { db in
-            for album in albums { try AlbumRecord(album, syncedAt: syncedAt).upsert(db) }
+            for album in albums { try saveKeepingNewestPlay(db, AlbumRecord(album, syncedAt: syncedAt)) }
         }
     }
 
     /// Stores an album and replaces its track list.
     public func upsert(_ detail: AlbumDetail, syncedAt: Date = Date()) throws {
         try db.write { db in
-            try AlbumRecord(detail.album, syncedAt: syncedAt).upsert(db)
+            try saveKeepingNewestPlay(db, AlbumRecord(detail.album, syncedAt: syncedAt))
             let keep = detail.tracks.map(\.id.description)
             try TrackRecord.filter(Column("albumID") == detail.album.id.description && !keep.contains(Column("id"))).deleteAll(db)
             for track in detail.tracks {
@@ -181,6 +181,23 @@ public final class LibraryStore: Sendable {
     public func setStarred(_ starred: Date?, track id: ItemID) throws {
         try db.write { db in
             try db.execute(sql: "UPDATE track SET starred = ? WHERE id = ?", arguments: [starred, id.description])
+        }
+    }
+
+    /// The server only learns of a play once it's scrobbled, so a refresh mustn't move this back.
+    private func saveKeepingNewestPlay(_ db: Database, _ album: AlbumRecord) throws {
+        var record = album
+        if let local = try Date.fetchOne(db, sql: "SELECT lastPlayed FROM album WHERE id = ?", arguments: [record.id]),
+           record.lastPlayed.map({ $0 < local }) ?? true {
+            record.lastPlayed = local
+        }
+        try record.upsert(db)
+    }
+
+    /// Updates Recently Played as soon as something starts, ahead of the next server sync.
+    public func markPlayed(album id: ItemID, at date: Date = Date()) throws {
+        _ = try db.write { db in
+            try AlbumRecord.filter(key: id.description).updateAll(db, Column("lastPlayed").set(to: date))
         }
     }
 
@@ -240,6 +257,13 @@ public final class LibraryStore: Sendable {
     public func starredTracks() throws -> [Track] {
         try db.read { db in
             try TrackRecord.filter(Column("starred") != nil).order(Column("starred").desc).fetchAll(db).compactMap(\.model)
+        }
+    }
+
+    /// Every track, by title.
+    public func allTracks() throws -> [Track] {
+        try db.read { db in
+            try TrackRecord.fetchAll(db, sql: "SELECT * FROM track ORDER BY title COLLATE NOCASE").compactMap(\.model)
         }
     }
 

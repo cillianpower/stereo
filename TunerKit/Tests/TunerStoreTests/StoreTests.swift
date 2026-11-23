@@ -223,3 +223,35 @@ actor FakeLibrary: LibrarySource {
         #expect(try store.album(iid("al100"))?.tracks.first?.title == "new")
     }
 }
+
+@Suite struct RecentlyPlayedTests {
+    @Test func startingAnAlbumMovesItToTheFront() throws {
+        let store = try LibraryStore.inMemory()
+        let older = makeAlbum(1, lastPlayed: Date(timeIntervalSince1970: 1000))
+        let newer = makeAlbum(2, lastPlayed: Date(timeIntervalSince1970: 2000))
+        let never = makeAlbum(3)
+        try store.upsert(albums: [older, newer, never])
+        #expect(try store.albums(sortedBy: .recentlyPlayed).map(\.id) == [newer.id, older.id])
+
+        try store.markPlayed(album: never.id, at: Date(timeIntervalSince1970: 3000))
+        try store.markPlayed(album: older.id, at: Date(timeIntervalSince1970: 4000))
+        #expect(try store.albums(sortedBy: .recentlyPlayed).map(\.id) == [older.id, never.id, newer.id])
+    }
+
+    @Test func aServerRefreshKeepsTheNewestPlayDate() throws {
+        let store = try LibraryStore.inMemory()
+        let album = makeAlbum(1)
+        try store.upsert(makeDetail(album, titles: ["A"]))
+        let played = Date(timeIntervalSince1970: 5000)
+        try store.markPlayed(album: album.id, at: played)
+
+        try store.upsert(makeDetail(album, titles: ["A"]))       // server hasn't seen the play
+        #expect(try store.album(album.id)?.album.lastPlayed == played)
+        try store.upsert(albums: [makeAlbum(1, lastPlayed: Date(timeIntervalSince1970: 1000))])
+        #expect(try store.album(album.id)?.album.lastPlayed == played)
+
+        let later = Date(timeIntervalSince1970: 9000)
+        try store.upsert(albums: [makeAlbum(1, lastPlayed: later)])
+        #expect(try store.album(album.id)?.album.lastPlayed == later)
+    }
+}

@@ -41,6 +41,32 @@ private func query(_ request: URLRequest) -> [String: String] {
     return Dictionary(items.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a })
 }
 
+@Suite struct AlbumInfoTests {
+    @Test func combinesOpenSubsonicFieldsAndServerNotes() async throws {
+        let transport = FixtureTransport()
+        transport.overrides["getAlbum"] = "getAlbumRich"
+        let library = makeLibrary(transport)
+        let info = try await library.albumInfo(ItemID(source: library.id, raw: "al-1"))
+        #expect(info.labels == ["Warp", "Skam"])
+        #expect(info.genres == ["IDM", "Ambient"])
+        #expect(info.moods == ["Hazy"])
+        #expect(info.released == AlbumInfo.ReleaseDate(year: 1998, month: 4, day: 20))
+        #expect(info.version == "Remaster")
+        #expect(info.notes == "An \"electronic\" landmark & debut.\nReleased in 1998.")
+        #expect(info.lastFmURL?.host() == "www.last.fm")
+        #expect(info.musicBrainzID == "9f2f4e1a-4bb8-4c0e-9d7f-111111111111")
+    }
+
+    @Test func aServerWithoutExtrasStillReturnsInfo() async throws {
+        let transport = FixtureTransport()
+        transport.overrides["getAlbumInfo2"] = "missing"
+        let library = makeLibrary(transport)
+        let info = try await library.albumInfo(ItemID(source: library.id, raw: "al-1"))
+        #expect(info.notes == nil)
+        #expect(info.labels.isEmpty)
+    }
+}
+
 @Suite struct SubsonicAPITests {
     @Test func tokenAuthUsesSaltedMD5() {
         let api = SubsonicAPI(

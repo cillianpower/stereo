@@ -35,8 +35,16 @@ public final class AppSettings {
         }
     }
 
+    /// The app's highlight color. System follows the accent chosen in macOS settings.
+    public enum AccentOption: String, CaseIterable, Identifiable, Sendable {
+        case system, red, pink, orange, yellow, green, teal, blue, purple, graphite
+        public var id: String { rawValue }
+        public var label: String { rawValue.capitalized }
+    }
+
     private let defaults: UserDefaults
 
+    public var accent: AccentOption { didSet { save(accent.rawValue, "accent") } }
     public var wifiQuality: QualityOption { didSet { save(wifiQuality.rawValue, "wifiQuality") } }
     public var cellularQuality: QualityOption { didSet { save(cellularQuality.rawValue, "cellularQuality") } }
     public var replayGainMode: ReplayGainMode { didSet { save(replayGainMode.rawValue, "replayGainMode") } }
@@ -49,6 +57,7 @@ public final class AppSettings {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        accent = defaults.string(forKey: "accent").flatMap(AccentOption.init) ?? .system
         wifiQuality = defaults.string(forKey: "wifiQuality").flatMap(QualityOption.init) ?? .original
         cellularQuality = defaults.string(forKey: "cellularQuality").flatMap(QualityOption.init) ?? .aac256
         replayGainMode = defaults.string(forKey: "replayGainMode").flatMap(ReplayGainMode.init) ?? .auto

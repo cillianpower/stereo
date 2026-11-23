@@ -34,38 +34,81 @@ struct NowPlayingArtwork: View {
 struct MiniPlayer: View {
     @Environment(AppModel.self) private var app
     @Binding var showNowPlaying: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var textOffset: CGFloat = 0
+    @State private var lift: CGFloat = 0
+    @State private var dragAxis: Axis?
+
+    private static let skipDistance: CGFloat = 150
 
     var body: some View {
         let player = app.player
-        HStack(spacing: 12) {
-            NowPlayingArtwork(cornerRadius: 6).frame(width: 40, height: 40)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(title).font(.subheadline.weight(.medium)).lineLimit(1)
-                if let sub = subtitle { Text(sub).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-            }
-            Spacer(minLength: 8)
-            if player.status == .loading || player.status == .buffering {
-                ProgressView().controlSize(.small)
-            }
-            Button { player.togglePlayPause() } label: {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").font(.title3)
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(.plain)
-            if case .track = player.nowPlaying {
-                Button { player.next() } label: { Image(systemName: "forward.fill").font(.title3).frame(width: 32, height: 32) }
-                    .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 12)
+        let isTrack = if case .track = player.nowPlaying { true } else { false }
+        MiniPlayerPill(
+            title: title,
+            subtitle: subtitle,
+            position: isTrack ? player.position : nil,
+            duration: isTrack ? player.duration : nil,
+            isPlaying: player.isPlaying,
+            isLoading: player.status == .loading || player.status == .buffering,
+            textOffset: textOffset,
+            onToggle: { player.togglePlayPause() }
+        )
+        .offset(y: lift)
+        .scaleEffect(1 + min(-lift, 12) / 400)
         .contentShape(.rect)
         .onTapGesture { showNowPlaying = true }
-        .gesture(DragGesture(minimumDistance: 20).onEnded { value in
-            if value.translation.height < -30 { showNowPlaying = true }
-            else if value.translation.width < -50 { player.next() }
-            else if value.translation.width > 50 { player.previous() }
-        })
+        .gesture(pillGesture)
+    }
+
+    /// The song follows a sideways swipe, and the pill's contents lift with an upward one.
+    private var pillGesture: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                let move = value.translation
+                let axis = dragAxis ?? (abs(move.width) > abs(move.height) ? .horizontal : .vertical)
+                dragAxis = axis
+                guard !reduceMotion else { return }
+                if axis == .horizontal {
+                    textOffset = move.width
+                } else {
+                    lift = max(min(move.height, 0) * 0.3, -12)
+                }
+            }
+            .onEnded { value in
+                let axis = dragAxis
+                dragAxis = nil
+                let move = value.translation
+                if axis == .vertical, move.height < -30 {
+                    showNowPlaying = true
+                } else if axis == .horizontal, move.width < -50 {
+                    skip(direction: -1) { app.player.next() }
+                    return
+                } else if axis == .horizontal, move.width > 50 {
+                    skip(direction: 1) { app.player.previous() }
+                    return
+                }
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.74)) {
+                    textOffset = 0
+                    lift = 0
+                }
+            }
+    }
+
+    /// The old song leaves in the swipe's direction and the new one arrives from the other side.
+    private func skip(direction: CGFloat, action: @escaping () -> Void) {
+        guard !reduceMotion else {
+            textOffset = 0
+            action()
+            return
+        }
+        withAnimation(.easeIn(duration: 0.12)) {
+            textOffset = direction * Self.skipDistance
+        } completion: {
+            action()
+            textOffset = -direction * Self.skipDistance
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) { textOffset = 0 }
+        }
     }
 
     private var title: String {
@@ -81,6 +124,79 @@ struct MiniPlayer: View {
     }
 }
 
+/// The contents of the iPhone's glass pill: song, artist, times, play/pause and a hairline.
+struct MiniPlayerPill: View {
+    let title: String
+    let subtitle: String?
+    let position: Double?
+    let duration: Double?
+    let isPlaying: Bool
+    var isLoading = false
+    /// How far a swipe has carried the song and artist.
+    var textOffset: CGFloat = 0
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.subheadline.weight(.semibold))
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .offset(x: textOffset)
+            .opacity(1 - min(abs(textOffset) / 150, 1) * 0.85)
+            .clipped()
+
+            if let position, let duration, duration > 0 {
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(Format.duration(position))
+                    Text("-" + Format.duration(max(0, duration - position)))
+                }
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(Format.duration(position)) of \(Format.duration(duration))")
+            }
+
+            Button(action: onToggle) {
+                Group {
+                    if isLoading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.title3)
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPlaying ? "Pause" : "Play")
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 4)
+        .overlay(alignment: .bottom) {
+            if let position, let duration, duration > 0 {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.primary.opacity(0.2))
+                        Capsule().fill(.tint).frame(width: geometry.size.width * min(max(position / duration, 0), 1))
+                    }
+                }
+                .frame(height: 2)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 3)
+                .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
 // MARK: Now Playing
 
 struct NowPlayingView: View {
@@ -90,6 +206,10 @@ struct NowPlayingView: View {
     @State private var scrubbing: Double?
     @State private var artworkOffset: CGFloat = 0
     @State private var lyrics: Lyrics?
+    /// Lyrics and the queue scroll, so a drag that starts inside them doesn't close the player.
+    @State private var panelFrame = CGRect.zero
+    /// The direction an artwork drag committed to, so one drag can't both skip and close.
+    @State private var artworkAxis: Axis?
 
     enum Panel { case artwork, lyrics, queue }
 
@@ -109,6 +229,7 @@ struct NowPlayingView: View {
                     }
                 }
                 .frame(maxHeight: .infinity)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { panelFrame = $0 }
 
                 titles
                 IdentificationBanner()
@@ -123,6 +244,9 @@ struct NowPlayingView: View {
         }
         .foregroundStyle(.white)
         .tint(.white)
+        .swipeDownToDismiss { start in
+            scrubbing != nil || artworkAxis == .horizontal || (panel != .artwork && panelFrame.contains(start))
+        }
         .task(id: trackID) { await loadLyrics() }
     }
 
@@ -160,10 +284,19 @@ struct NowPlayingView: View {
             .animation(.spring(response: 0.45, dampingFraction: 0.7), value: app.player.isPlaying)
             .offset(x: artworkOffset)
             .gesture(DragGesture(minimumDistance: 10)
-                .onChanged { artworkOffset = $0.translation.width * 0.6 }
+                .onChanged { value in
+                    let move = value.translation
+                    let axis = artworkAxis ?? (abs(move.width) > abs(move.height) ? .horizontal : .vertical)
+                    artworkAxis = axis
+                    // A drag that started downward belongs to closing the player.
+                    if axis == .horizontal { artworkOffset = move.width * 0.6 }
+                }
                 .onEnded { value in
-                    if value.translation.width < -80 { app.player.next() }
-                    else if value.translation.width > 80 { app.player.previous() }
+                    if artworkAxis == .horizontal {
+                        if value.translation.width < -80 { app.player.next() }
+                        else if value.translation.width > 80 { app.player.previous() }
+                    }
+                    artworkAxis = nil
                     withAnimation(.spring) { artworkOffset = 0 }
                 })
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -215,7 +348,11 @@ struct NowPlayingView: View {
         let duration = max(app.player.duration ?? 1, 1)
         let position = scrubbing ?? app.player.position
         return VStack(spacing: 4) {
+            #if os(iOS)
+            TouchScrubber(position: app.player.position, duration: duration, scrubbing: $scrubbing) { app.player.seek(to: $0) }
+            #else
             SeekSlider(position: app.player.position, duration: duration, scrubbing: $scrubbing) { app.player.seek(to: $0) }
+            #endif
             HStack {
                 Text(Format.duration(position))
                 Spacer()
@@ -284,6 +421,147 @@ struct NowPlayingView: View {
     }
 }
 
+#if os(iOS)
+/// The player's position bar. A drag commits to a direction as it starts: sideways scrubs, and
+/// anything else is left alone so the player can be swiped away from here too.
+struct TouchScrubber: View {
+    let position: Double
+    let duration: Double
+    @Binding var scrubbing: Double?
+    let onSeek: (Double) -> Void
+    @State private var axis: Axis?
+    @GestureState private var isTouching = false
+
+    var body: some View {
+        let shown = min(max((scrubbing ?? position) / duration, 0), 1)
+        GeometryReader { geometry in
+            let thickness: CGFloat = scrubbing == nil ? 4 : 6
+            let head: CGFloat = scrubbing == nil ? 16 : 22
+            // The head stops at the ends of the bar rather than hanging past them.
+            let headX = max(geometry.size.width - head, 0) * shown
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.25)).frame(height: thickness)
+                Capsule().fill(.tint).frame(width: headX + head / 2, height: thickness)
+                Circle()
+                    .fill(.white)
+                    .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
+                    .frame(width: head, height: head)
+                    .offset(x: headX)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(Motion.hover, value: scrubbing == nil)
+            .contentShape(.rect)
+            .onTapGesture { location in
+                guard geometry.size.width > 0 else { return }
+                onSeek(min(max(location.x / geometry.size.width, 0), 1) * duration)
+            }
+            .gesture(drag(width: geometry.size.width))
+        }
+        .frame(height: 30)
+        // If the system cancels the touch, onEnded never runs, so control still has to come back.
+        .onChange(of: isTouching) { _, touching in
+            guard !touching else { return }
+            axis = nil
+            scrubbing = nil
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Playback Position")
+        .accessibilityValue(Format.duration(scrubbing ?? position))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: onSeek(min(position + 5, duration))
+            case .decrement: onSeek(max(position - 5, 0))
+            @unknown default: break
+            }
+        }
+    }
+
+    private func drag(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 6)
+            .updating($isTouching) { _, state, _ in state = true }
+            .onChanged { value in
+                let move = value.translation
+                let direction = axis ?? (abs(move.width) > abs(move.height) ? .horizontal : .vertical)
+                axis = direction
+                guard direction == .horizontal, width > 0 else { return }
+                scrubbing = min(max(value.location.x / width, 0), 1) * duration
+            }
+            .onEnded { _ in
+                if axis == .horizontal, let target = scrubbing { onSeek(target) }
+                axis = nil
+                scrubbing = nil
+            }
+    }
+}
+
+/// Drag a full-screen player down to close it. It follows the finger with the page visible behind,
+/// and springs back if the swipe is too short.
+private struct SwipeDownToDismiss: ViewModifier {
+    /// Given where a drag started, whether something else owns it.
+    let isBlocked: (CGPoint) -> Bool
+    @Environment(\.dismiss) private var dismiss
+    @State private var offset: CGFloat = 0
+    @State private var height: CGFloat = 900
+    /// Decided once per drag: nil before the first movement.
+    @State private var isTracking: Bool?
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            .mask {
+                RoundedRectangle(cornerRadius: min(offset / 3, 44), style: .continuous).ignoresSafeArea()
+            }
+            .offset(y: offset)
+            .simultaneousGesture(drag)
+            .presentationBackground(.clear)
+    }
+
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .global)
+            .onChanged { value in
+                let move = value.translation
+                let tracking = isTracking ?? (move.height > 0 && move.height > abs(move.width) * 1.2 && !isBlocked(value.startLocation))
+                isTracking = tracking
+                if tracking { offset = max(move.height, 0) }
+            }
+            .onEnded { value in
+                let wasTracking = isTracking == true
+                isTracking = nil
+                guard wasTracking else { return }
+                // Short enough to work from the controls, which sit near the bottom of the screen.
+                if value.translation.height > 100 || value.predictedEndTranslation.height > 320 {
+                    close()
+                } else {
+                    withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) { offset = 0 }
+                }
+            }
+    }
+
+    private func close() {
+        withAnimation(.easeOut(duration: 0.22)) {
+            offset = height + 120
+        } completion: {
+            // Already off screen, so the system's own slide would only replay it.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { dismiss() }
+        }
+    }
+}
+#endif
+
+extension View {
+    /// Lets a full-screen player be dragged away. Does nothing on the Mac.
+    @ViewBuilder
+    func swipeDownToDismiss(isBlocked: @escaping (CGPoint) -> Bool) -> some View {
+        #if os(iOS)
+        modifier(SwipeDownToDismiss(isBlocked: isBlocked))
+        #else
+        self
+        #endif
+    }
+}
+
 /// A position slider that shows the drag while editing and always hands control back afterwards.
 /// `Slider` can deliver a value after its editing-ended callback, or without any callback at all,
 /// so `scrubbing` is only ever set during an edit.
@@ -321,39 +599,133 @@ struct SeekSlider: View {
     }
 }
 
+/// Lyrics that follow the song: the current line is bright, and lines soften with distance from it.
+/// Scrolling by hand pauses the follow for a few seconds.
 struct LyricsView: View {
     let lyrics: Lyrics?
     let position: TimeInterval
+    var fontSize: CGFloat = 28
     let seek: (TimeInterval) -> Void
+    @State private var isFollowing = true
+    @State private var resumeFollow: Task<Void, Never>?
+
+    private static let introID = -1
 
     var body: some View {
         if let lyrics, !lyrics.lines.isEmpty {
-            let active = lyrics.activeLineIndex(at: .seconds(position))
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        ForEach(Array(lyrics.lines.enumerated()), id: \.offset) { i, line in
-                            Text(line.text.isEmpty ? "♪" : line.text)
-                                .font(.title2.bold())
-                                .opacity(!lyrics.isSynced || i == active ? 1 : 0.35)
-                                .blur(radius: lyrics.isSynced && active != nil && i != active ? 0.6 : 0)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id(i)
-                                .onTapGesture { if let s = line.start { seek(TimeInterval(s.components.seconds) + Double(s.components.attoseconds) / 1e18) } }
-                        }
-                    }
-                    .padding(.vertical, 120)
-                }
-                .scrollIndicators(.hidden)
-                .onChange(of: active) { _, new in
-                    guard let new else { return }
-                    withAnimation(.easeInOut(duration: 0.5)) { proxy.scrollTo(new, anchor: .center) }
-                }
-            }
+            content(lyrics)
         } else {
             ContentUnavailableView("No Lyrics", systemImage: "quote.bubble")
-                .foregroundStyle(.white.opacity(0.6))
+                .opacity(0.6)
         }
+    }
+
+    private func content(_ lyrics: Lyrics) -> some View {
+        let active = lyrics.activeLineIndex(at: .seconds(position))
+        let intro = introProgress(lyrics)
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: fontSize * 0.72) {
+                    if let intro {
+                        LyricsGapDots(progress: intro, size: fontSize * 0.34).id(Self.introID)
+                    }
+                    ForEach(Array(lyrics.lines.enumerated()), id: \.offset) { index, line in
+                        row(line, index: index, active: active, lyrics: lyrics).id(index)
+                    }
+                }
+                .padding(.vertical, 160)
+                .padding(.trailing, 8)
+            }
+            .scrollIndicators(.hidden)
+            .onScrollPhaseChange { _, phase in
+                if phase == .interacting || phase == .tracking {
+                    resumeFollow?.cancel()
+                    isFollowing = false
+                } else if phase == .idle, !isFollowing {
+                    resumeFollow?.cancel()
+                    resumeFollow = Task {
+                        try? await Task.sleep(for: .seconds(3))
+                        guard !Task.isCancelled else { return }
+                        isFollowing = true
+                        if let line = lyrics.activeLineIndex(at: .seconds(position)) {
+                            withAnimation(Motion.page) { proxy.scrollTo(line, anchor: .center) }
+                        }
+                    }
+                }
+            }
+            .onChange(of: active) { _, new in
+                guard let new, isFollowing else { return }
+                withAnimation(.spring(response: 0.62, dampingFraction: 0.86)) { proxy.scrollTo(new, anchor: .center) }
+            }
+            .onAppear {
+                if let active { proxy.scrollTo(active, anchor: .center) }
+            }
+            .onDisappear { resumeFollow?.cancel() }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ line: Lyrics.Line, index: Int, active: Int?, lyrics: Lyrics) -> some View {
+        if line.text.trimmingCharacters(in: .whitespaces).isEmpty {
+            if lyrics.isSynced, index == active {
+                LyricsGapDots(progress: gapProgress(index, lyrics), size: fontSize * 0.34)
+            } else {
+                Color.clear.frame(height: 2)
+            }
+        } else {
+            let distance = lyrics.isSynced ? abs(index - (active ?? -1)) : 0
+            let text = Text(line.text)
+                .font(.system(size: fontSize, weight: .bold))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .opacity(distance == 0 ? 1 : max(0.42 - Double(distance - 1) * 0.06, 0.2))
+                .blur(radius: isFollowing ? min(CGFloat(distance) * 0.55, 2.4) : 0)
+                .scaleEffect(distance == 0 ? 1 : 0.965, anchor: .leading)
+                .animation(.spring(response: 0.5, dampingFraction: 0.84), value: distance)
+                .animation(Motion.page, value: isFollowing)
+                .contentShape(.rect)
+            if let start = line.start {
+                Button { seek(Self.seconds(start)) } label: { text }
+                    .buttonStyle(.plain)
+            } else {
+                text
+            }
+        }
+    }
+
+    /// How far through the silence before the first line, if there is one worth showing.
+    private func introProgress(_ lyrics: Lyrics) -> Double? {
+        guard lyrics.isSynced, let first = lyrics.lines.first?.start.map(Self.seconds), first >= 3, position < first else { return nil }
+        return position / first
+    }
+
+    private func gapProgress(_ index: Int, _ lyrics: Lyrics) -> Double {
+        guard let start = lyrics.lines[index].start.map(Self.seconds) else { return 0 }
+        let next = lyrics.lines[(index + 1)...].lazy.compactMap(\.start).first.map(Self.seconds)
+        guard let next, next > start else { return 0 }
+        return (position - start) / (next - start)
+    }
+
+    private static func seconds(_ duration: Duration) -> TimeInterval {
+        TimeInterval(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+    }
+}
+
+/// Three dots that fill in during an instrumental gap.
+private struct LyricsGapDots: View {
+    let progress: Double
+    let size: CGFloat
+
+    var body: some View {
+        HStack(spacing: size * 0.7) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .frame(width: size, height: size)
+                    .opacity(0.25 + 0.75 * min(max(progress * 3 - Double(index), 0), 1))
+            }
+        }
+        .frame(height: size * 2)
+        .accessibilityHidden(true)
     }
 }
 
@@ -365,11 +737,18 @@ struct QueueView: View {
         List {
             if !queue.upNext.isEmpty {
                 Section {
-                    ForEach(queue.upNext) { row($0) }
-                        .onDelete { app.player.removeFromUpNext(at: $0) }
-                        .onMove { app.player.moveUpNext(from: $0, to: $1) }
+                    ForEach(Array(queue.upNext.enumerated()), id: \.element.id) { index, track in
+                        row(track)
+                            #if os(macOS)
+                            .contextMenu {
+                                Button("Remove from Queue") { app.player.removeFromUpNext(at: IndexSet(integer: index)) }
+                            }
+                            #endif
+                    }
+                    .onDelete { app.player.removeFromUpNext(at: $0) }
+                    .onMove { app.player.moveUpNext(from: $0, to: $1) }
                 } header: {
-                    Text("Up Next").foregroundStyle(.white.opacity(0.7))
+                    Text("Up Next").opacity(0.7)
                 }
             }
             Section {
@@ -378,14 +757,14 @@ struct QueueView: View {
                 }
             } header: {
                 HStack {
-                    Text(contextTitle).foregroundStyle(.white.opacity(0.7))
+                    Text(contextTitle).opacity(0.7)
                     Spacer()
                     Button { app.player.setShuffle(!queue.isShuffled) } label: {
-                        Image(systemName: "shuffle").foregroundStyle(queue.isShuffled ? .white : .white.opacity(0.5))
+                        Image(systemName: "shuffle").opacity(queue.isShuffled ? 1 : 0.5)
                     }
                     Button { app.player.cycleRepeat() } label: {
                         Image(systemName: queue.repeatMode == .one ? "repeat.1" : "repeat")
-                            .foregroundStyle(queue.repeatMode == .off ? .white.opacity(0.5) : .white)
+                            .opacity(queue.repeatMode == .off ? 0.5 : 1)
                     }
                 }
                 .buttonStyle(.plain)
@@ -393,6 +772,14 @@ struct QueueView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        #if os(macOS)
+        .dropDestination(for: String.self) { payloads, _ in
+            let tracks = (try? app.store.tracks(ids: TrackDrag.ids(in: payloads))) ?? []
+            guard !tracks.isEmpty else { return false }
+            app.player.addToQueue(tracks)
+            return true
+        }
+        #endif
     }
 
     private var contextTitle: String {
@@ -404,11 +791,11 @@ struct QueueView: View {
     }
 
     private func row(_ track: Track) -> some View {
-        HStack(spacing: 12) {
-            ArtworkView(.coverArt(track.coverArtID), cornerRadius: 4, size: 40)
-            VStack(alignment: .leading) {
-                Text(track.title).lineLimit(1)
-                Text(track.artist ?? "").font(.caption).opacity(0.6).lineLimit(1)
+        HStack(spacing: Metrics.queueArtwork < 40 ? 8 : 12) {
+            ArtworkView(.coverArt(track.coverArtID), cornerRadius: 4, size: Metrics.queueArtwork)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(track.title).font(Metrics.queueArtwork < 40 ? .caption.weight(.medium) : .body).lineLimit(1)
+                Text(track.artist ?? "").font(Metrics.queueArtwork < 40 ? .caption2 : .caption).opacity(0.6).lineLimit(1)
             }
         }
         .listRowBackground(Color.clear)

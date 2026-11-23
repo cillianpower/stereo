@@ -72,7 +72,7 @@ final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate, @u
         self.queue = queue
         self.configuration = configuration
         fileURL = FileManager.default.temporaryDirectory.appending(path: "tuner-stream-\(UUID().uuidString)")
-        FileManager.default.createFile(atPath: fileURL.path(), contents: nil)
+        FileManager.default.createFile(atPath: fileURL.path(percentEncoded: false), contents: nil)
         writer = try FileHandle(forWritingTo: fileURL)
         reader = try FileHandle(forReadingFrom: fileURL)
         super.init()

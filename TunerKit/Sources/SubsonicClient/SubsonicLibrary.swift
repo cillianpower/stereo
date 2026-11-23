@@ -90,6 +90,38 @@ public actor SubsonicLibrary: LibrarySource {
         return AlbumDetail(album: map(body.album), tracks: (body.album.song ?? []).map(map))
     }
 
+    /// Labels, dates and moods from OpenSubsonic, plus notes and links from `getAlbumInfo2`. Notes
+    /// need a metadata agent such as Last.fm on the server, so their absence isn't an error.
+    public func albumInfo(_ albumID: ItemID) async throws -> AlbumInfo {
+        let query = [URLQueryItem(name: "id", value: try raw(albumID))]
+        let album = (try? await get(AlbumExtrasBody.self, "getAlbum", query))?.album
+        let notes = (try? await get(AlbumInfoBody.self, "getAlbumInfo2", query))?.albumInfo
+        guard album != nil || notes != nil else { throw SubsonicError.invalidID(albumID.description) }
+
+        func clean(_ values: [String?]?) -> [String] {
+            var seen = Set<String>()
+            return (values ?? []).compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+        }
+        func nonEmpty(_ value: String?) -> String? {
+            guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+            return value
+        }
+        let date = [album?.originalReleaseDate, album?.releaseDate].compactMap { $0 }.first { $0.year != nil }
+        return AlbumInfo(
+            notes: AlbumInfo.plainText(fromHTML: notes?.notes),
+            lastFmURL: nonEmpty(notes?.lastFmUrl).flatMap(URL.init(string:)),
+            musicBrainzID: nonEmpty(notes?.musicBrainzId) ?? nonEmpty(album?.musicBrainzId),
+            labels: clean(album?.recordLabels?.map(\.name)),
+            releaseTypes: clean(album?.releaseTypes),
+            genres: clean(album?.genres?.map(\.name)),
+            moods: clean(album?.moods),
+            released: date.map { AlbumInfo.ReleaseDate(year: $0.year, month: $0.month, day: $0.day) },
+            version: nonEmpty(album?.version),
+            isCompilation: album?.isCompilation ?? false
+        )
+    }
+
     public func artists() async throws -> [Artist] {
         let body = try await get(ArtistsBody.self, "getArtists")
         return (body.artists.index ?? []).flatMap { $0.artist ?? [] }.map(map)

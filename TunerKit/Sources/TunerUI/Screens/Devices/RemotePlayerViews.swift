@@ -3,7 +3,7 @@ import TunerModel
 import TunerRemote
 
 /// Artwork for the remote device's current item.
-private struct RemoteArtwork: View {
+struct RemoteArtwork: View {
     let item: RemoteItem?
     var cornerRadius: CGFloat = 8
 
@@ -16,7 +16,7 @@ private struct RemoteArtwork: View {
     }
 }
 
-private extension RemoteState {
+extension RemoteState {
     var title: String {
         if case .station = item, let t = streamTitle.map(StreamTitle.init(raw:))?.title { return t }
         return item?.title ?? "Not Playing"
@@ -41,26 +41,16 @@ struct RemoteMiniPlayer: View {
     var body: some View {
         let remote = app.remote
         let state = remote.remoteState ?? RemoteState()
-        HStack(spacing: 12) {
-            RemoteArtwork(item: state.item, cornerRadius: 6).frame(width: 40, height: 40)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(state.title).font(.subheadline.weight(.medium)).lineLimit(1)
-                Label(remote.controller?.device?.name ?? "", systemImage: remote.controller?.device?.kind.symbolName ?? "hifispeaker")
-                    .font(.caption).foregroundStyle(.tint).lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            Button { remote.send(.togglePlayPause) } label: {
-                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").font(.title3)
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(.plain)
-            if state.isTrack {
-                Button { remote.send(.next) } label: { Image(systemName: "forward.fill").font(.title3).frame(width: 32, height: 32) }
-                    .buttonStyle(.plain)
-            }
+        TimelineView(.periodic(from: .now, by: 0.5)) { context in
+            MiniPlayerPill(
+                title: state.title,
+                subtitle: remote.controller?.device?.name,
+                position: state.isTrack ? state.anchor.position(at: context.date) : nil,
+                duration: state.isTrack ? state.duration : nil,
+                isPlaying: state.isPlaying,
+                onToggle: { remote.send(.togglePlayPause) }
+            )
         }
-        .padding(.horizontal, 12)
         .contentShape(.rect)
         .onTapGesture { showNowPlaying = true }
     }
@@ -111,7 +101,11 @@ struct RemoteNowPlayingView: View {
                         let live = min(state.anchor.position(at: context.date), duration)
                         let position = scrubbing ?? live
                         VStack(spacing: 4) {
+                            #if os(iOS)
+                            TouchScrubber(position: live, duration: duration, scrubbing: $scrubbing) { remote.send(.seek($0)) }
+                            #else
                             SeekSlider(position: live, duration: duration, scrubbing: $scrubbing) { remote.send(.seek($0)) }
+                            #endif
                             HStack {
                                 Text(Format.duration(position))
                                 Spacer()
@@ -161,6 +155,7 @@ struct RemoteNowPlayingView: View {
         }
         .foregroundStyle(.white)
         .tint(.white)
+        .swipeDownToDismiss { _ in scrubbing != nil || volume != nil }
         .sheet(isPresented: $showDevices) { DevicePickerSheet() }
         .onChange(of: remote.isControllingRemote) { _, controlling in if !controlling { dismiss() } }
     }

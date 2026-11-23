@@ -46,6 +46,8 @@ public final class PlayerController {
     @ObservationIgnored public var library: LibrarySource?
     /// Called when a station starts, e.g. to record a click with Radio Browser.
     @ObservationIgnored public var onStationStarted: ((Station) -> Void)?
+    /// Called when a track starts playing, including gapless transitions.
+    @ObservationIgnored public var onTrackStarted: ((Track) -> Void)?
     /// Called when the library queue runs out. Return tracks to keep playing (auto-continue /
     /// smart shuffle), or an empty array to stop.
     @ObservationIgnored public var onQueueExhausted: ((PlayQueue) async -> [Track])?
@@ -263,7 +265,10 @@ public final class PlayerController {
             status = .paused
         }
         startPositionUpdates()
-        if autoplay { report(.nowPlaying(track.id)) }
+        if autoplay {
+            report(.nowPlaying(track.id))
+            onTrackStarted?(track)
+        }
         refreshNext()
         schedulePrefetch()
     }
@@ -328,6 +333,7 @@ public final class PlayerController {
                 position = 0
                 scrobbled = false
                 report(.nowPlaying(track.id))
+                onTrackStarted?(track)
                 engineIDs = engineIDs.filter { $0.key == id }
                 refreshNext()
                 schedulePrefetch()

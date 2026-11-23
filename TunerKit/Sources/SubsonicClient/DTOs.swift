@@ -128,6 +128,33 @@ struct AlbumList2Body: Decodable {
 
 struct AlbumBody: Decodable { let album: AlbumDTO }
 
+/// OpenSubsonic album fields, decoded separately so a server without them can't break browsing.
+struct AlbumExtrasBody: Decodable {
+    struct Named: Decodable { let name: String? }
+    struct DateParts: Decodable { let year: Int?; let month: Int?; let day: Int? }
+    struct Album: Decodable {
+        let recordLabels: [Named]?
+        let releaseTypes: [String]?
+        let genres: [Named]?
+        let moods: [String]?
+        let originalReleaseDate: DateParts?
+        let releaseDate: DateParts?
+        let version: String?
+        let isCompilation: Bool?
+        let musicBrainzId: String?
+    }
+    let album: Album
+}
+
+struct AlbumInfoBody: Decodable {
+    struct Info: Decodable {
+        let notes: String?
+        let musicBrainzId: String?
+        let lastFmUrl: String?
+    }
+    let albumInfo: Info?
+}
+
 struct ArtistsBody: Decodable {
     struct Index: Decodable { let name: String; let artist: [ArtistDTO]? }
     struct Artists: Decodable { let index: [Index]? }

@@ -120,6 +120,19 @@ import Testing
         #expect(requests < 40)
     }
 
+    /// Resampling must reach the end of a file without an error or losing its last buffer.
+    @Test func resampledFileDecodesToItsEnd() throws {
+        let url = try #require(Bundle.module.url(forResource: "sweep1", withExtension: "flac", subdirectory: "Fixtures"))
+        let source = try AVAudioFile(forReading: url)
+        let seconds = Double(source.length) / source.processingFormat.sampleRate
+        let output48k = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
+        let item = EngineItem(id: "resample", source: .file(url))
+        let decoder = try FileDecoder(item: item, url: url, outputFormat: output48k)
+        var frames = 0
+        while let buffer = try decoder.readBuffer(frames: 8192) { frames += Int(buffer.frameLength) }
+        #expect(abs(Double(frames) / 48_000 - seconds) < 0.01)
+    }
+
     @Test func flac() async throws {
         try await check(ext: "flac", hint: "flac", settings: [
             AVFormatIDKey: kAudioFormatFLAC, AVSampleRateKey: Self.rate, AVNumberOfChannelsKey: 2,

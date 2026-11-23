@@ -51,6 +51,7 @@ let package = Package(
         .testTarget(name: "TunerDiscoveryTests", dependencies: ["TunerDiscovery"], resources: [.copy("Fixtures")]),
         .testTarget(name: "TunerSyncTests", dependencies: ["TunerSync", "TunerStore"]),
         .testTarget(name: "TunerRemoteTests", dependencies: ["TunerRemote"]),
+        .testTarget(name: "TunerUITests", dependencies: ["TunerUI"]),
         // Runs against a real Navidrome. Skipped unless TUNER_IT_URL is set (see Tests/IntegrationTests).
         .testTarget(name: "IntegrationTests", dependencies: ["SubsonicClient", "TunerStore", "TunerPlayback"]),
     ],

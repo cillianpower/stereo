@@ -32,11 +32,11 @@ struct SongTable: View {
 
     var body: some View {
         let rows = sorted
-        Table(rows, selection: $selection, sortOrder: $sortOrder) {
+        Table(of: Track.self, selection: $selection, sortOrder: $sortOrder) {
             if showNumber {
                 TableColumn("#", value: \.sortTrackNumber) { track in
                     if track.id == currentID {
-                        Image(systemName: "speaker.wave.2.fill").foregroundStyle(.tint)
+                        PlayingBars(isPlaying: app.player.isPlaying)
                     } else {
                         Text(track.trackNumber.map(String.init) ?? "").foregroundStyle(.secondary).monospacedDigit()
                     }
@@ -62,7 +62,14 @@ struct SongTable: View {
             .width(min: 60, ideal: 90)
             TableColumn("Time", value: \.sortDuration) { Text(Format.duration($0.duration)).monospacedDigit().foregroundStyle(.secondary) }
                 .width(56)
+        } rows: {
+            ForEach(rows) { track in
+                TableRow(track).draggable(dragPayload(for: track, in: rows))
+            }
         }
+        .alternatingRowBackgrounds(.disabled)
+        .controlSize(.small)
+        .scrollContentBackground(.hidden)
         .contextMenu(forSelectionType: Track.ID.self) { ids in
             let picked = rows.filter { ids.contains($0.id) }
             if picked.count == 1, let track = picked.first {
@@ -80,6 +87,23 @@ struct SongTable: View {
             play(rows, index)
             return .handled
         }
+    }
+
+    /// Dragging a selected row carries the whole selection, in table order.
+    private func dragPayload(for track: Track, in rows: [Track]) -> String {
+        let dragged = selection.contains(track.id) ? rows.filter { selection.contains($0.id) } : [track]
+        return TrackDrag.payload(dragged)
+    }
+}
+
+/// Tracks travel through drag and drop as newline-separated item IDs.
+enum TrackDrag {
+    static func payload(_ tracks: [Track]) -> String {
+        tracks.map(\.id.description).joined(separator: "\n")
+    }
+
+    static func ids(in payloads: [String]) -> [ItemID] {
+        payloads.flatMap { $0.split(separator: "\n") }.compactMap { ItemID(string: String($0)) }
     }
 }
 #endif

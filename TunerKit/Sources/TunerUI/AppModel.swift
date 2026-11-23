@@ -27,6 +27,9 @@ public final class AppModel {
     public private(set) var librarySyncCount = 0
     /// A screen requested from outside the UI (Spotlight, Siri). `AppShell` opens it and clears this.
     public var pendingDestination: AppDestination?
+    #if os(macOS)
+    public let shell = MacShellState()
+    #endif
 
     /// Artwork and album for the station's current song, plus the matching track in your library.
     public private(set) var radioEnrichment: EnrichedTitle?
@@ -91,6 +94,9 @@ public final class AppModel {
 
         player.replayGain = settings.replayGainSettings
         player.onStationStarted = { [weak self] station in self?.stationStarted(station) }
+        player.onTrackStarted = { [weak self] track in
+            if let album = track.albumID { try? self?.store.markPlayed(album: album) }
+        }
         #if os(iOS) || os(tvOS)
         audioSession = AudioSessionCoordinator(player: player)
         #endif
@@ -149,7 +155,9 @@ public final class AppModel {
         var stored = config
         stored.credential = .password("")   // secret lives in the Keychain, not UserDefaults
         UserDefaults.standard.set(try JSONEncoder().encode(stored), forKey: Self.serverDefaultsKey)
-        Keychain.set(password, for: config.id.rawValue)
+        if !Keychain.set(password, for: config.id.rawValue) {
+            log.error("couldn't save the password; sign-in will last until the app quits")
+        }
         connect(config, library: candidate)
     }
 

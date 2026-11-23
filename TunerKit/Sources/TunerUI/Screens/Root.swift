@@ -13,11 +13,17 @@ public struct RootView: View {
         switch app.phase {
         case .launching: ProgressView().task { await app.start() }
         case .signedOut: SignInView()
-        case .ready: AppShell()
+        case .ready:
+            #if os(macOS)
+            MacShell()
+            #else
+            AppShell()
+            #endif
         }
     }
 }
 
+#if !os(macOS)
 struct AppShell: View {
     @Environment(AppModel.self) private var app
     @State private var tab: TabID = .home
@@ -31,9 +37,6 @@ struct AppShell: View {
             Tab("Home", systemImage: "house", value: .home) { stack(.home) { HomeView() } }
             Tab("Radio", systemImage: "dot.radiowaves.left.and.right", value: .radio) { stack(.radio) { RadioView() } }
             Tab("Library", systemImage: "square.stack.fill", value: .library) { stack(.library) { LibraryView() } }
-            #if os(macOS)
-            Tab("Settings", systemImage: "gear", value: .settings) { stack(.settings) { SettingsView() } }
-            #endif
             Tab(value: .search, role: .search) { stack(.search) { SearchView() } }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -52,28 +55,13 @@ struct AppShell: View {
             app.pendingDestination = nil
         }
         #if os(iOS)
+        .tabBarMinimizeBehavior(.onScrollDown)
         .tabViewBottomAccessory {
             if app.remote.isControllingRemote { RemoteMiniPlayer(showNowPlaying: $showNowPlaying) }
             else { MiniPlayer(showNowPlaying: $showNowPlaying) }
         }
         .fullScreenCover(isPresented: $showNowPlaying) {
             if app.remote.isControllingRemote { RemoteNowPlayingView() } else { NowPlayingView() }
-        }
-        #else
-        .safeAreaInset(edge: .bottom) {
-            if app.player.nowPlaying != nil || app.remote.isControllingRemote {
-                Group {
-                    if app.remote.isControllingRemote { RemoteMiniPlayer(showNowPlaying: $showNowPlaying) }
-                    else { MiniPlayer(showNowPlaying: $showNowPlaying) }
-                }
-                    .padding(.vertical, 8)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 14))
-                    .padding(10)
-            }
-        }
-        .sheet(isPresented: $showNowPlaying) {
-            Group { if app.remote.isControllingRemote { RemoteNowPlayingView() } else { NowPlayingView() } }
-                .frame(minWidth: 480, minHeight: 720)
         }
         #endif
     }
@@ -92,6 +80,7 @@ struct AppShell: View {
         }
     }
 }
+#endif
 
 // MARK: Sign in
 
@@ -229,6 +218,27 @@ struct SettingsView: View {
             } header: { Text("Streaming Quality") } footer: {
                 Text("\(app.isOnExpensiveNetwork ? "Currently using the cellular setting." : "Currently using the Wi-Fi setting.") Gapless playback is guaranteed for originals; some transcodes add tiny gaps.")
             }
+            #if os(macOS)
+            Section("Appearance") {
+                LabeledContent("Accent Color") {
+                    HStack(spacing: 7) {
+                        ForEach(AppSettings.AccentOption.allCases) { option in
+                            Button { settings.accent = option } label: {
+                                Circle()
+                                    .fill(option.color)
+                                    .frame(width: 16, height: 16)
+                                    .overlay { if settings.accent == option { Circle().fill(.white).frame(width: 6, height: 6) } }
+                                    .overlay { if option == .system { Circle().strokeBorder(.primary.opacity(0.4), lineWidth: 1) } }
+                            }
+                            .buttonStyle(.plain)
+                            .help(option.label)
+                            .accessibilityLabel(option.label)
+                            .accessibilityAddTraits(settings.accent == option ? .isSelected : [])
+                        }
+                    }
+                }
+            }
+            #endif
             Section("Sound") {
                 Picker("Sound Check (ReplayGain)", selection: $settings.replayGainMode) {
                     Text("Off").tag(ReplayGainMode.off)
@@ -307,20 +317,32 @@ public struct MenuBarPlayer: View {
 
 // MARK: Keyboard shortcuts
 
-/// Mac menu commands: Space for play/pause, ⌘← and ⌘→ to skip.
+#if os(macOS)
+/// Mac menu commands. Space is handled in `MacShell` so it still types in text fields.
 public struct PlaybackCommands: Commands {
     let app: AppModel
     public init(app: AppModel) { self.app = app }
 
     public var body: some Commands {
+        SidebarCommands()
+        CommandGroup(before: .sidebar) {
+            Button("Search") { app.shell.focusSearch() }.keyboardShortcut("f", modifiers: .command)
+            Button("Now Playing") { app.shell.toggleNowPlaying() }.keyboardShortcut("p", modifiers: [.command, .option])
+            Button("Lyrics") { app.shell.toggle(.lyrics) }.keyboardShortcut("l", modifiers: .command)
+            Button("Queue") { app.shell.toggle(.queue) }.keyboardShortcut("u", modifiers: [.command, .option])
+            Divider()
+        }
         CommandMenu("Controls") {
-            Button(app.player.isPlaying ? "Pause" : "Play") { app.player.togglePlayPause() }
-                .keyboardShortcut(.space, modifiers: [])
+            Button(app.player.isPlaying ? "Pause" : "Play") { app.toggleTransport() }
             Button("Next") { app.player.next() }.keyboardShortcut(.rightArrow, modifiers: .command)
             Button("Previous") { app.player.previous() }.keyboardShortcut(.leftArrow, modifiers: .command)
+            Divider()
+            Button("Increase Volume") { app.adjustVolume(by: 0.1) }.keyboardShortcut(.upArrow, modifiers: .command)
+            Button("Decrease Volume") { app.adjustVolume(by: -0.1) }.keyboardShortcut(.downArrow, modifiers: .command)
             Divider()
             Button("Shuffle") { app.player.setShuffle(!app.player.queue.isShuffled) }
             Button("Repeat") { app.player.cycleRepeat() }.keyboardShortcut("r", modifiers: .command)
         }
     }
 }
+#endif

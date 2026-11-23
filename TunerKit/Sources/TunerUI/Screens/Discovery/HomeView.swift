@@ -10,7 +10,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 28) {
+            LazyVStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
                 if let error = app.syncError, shelves.isEmpty {
                     ContentUnavailableView("Can't Reach Server", systemImage: "wifi.exclamationmark", description: Text(error))
                 }
@@ -21,9 +21,11 @@ struct HomeView: View {
                     ListenBrainzPromo()
                 }
             }
-            .padding(.vertical)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
         }
         .navigationTitle("Home")
+        .pageHeader("Home")
         .overlay {
             if !loaded || (shelves.isEmpty && app.syncProgress != nil) {
                 ProgressView(app.syncProgress?.phase ?? "Loading…")
@@ -40,6 +42,15 @@ struct HomeView: View {
         }
         .task {
             for await _ in app.store.observeFavoriteStations() { await reload() }
+        }
+        // Keeps the Recently Played shelf current as you listen.
+        .task {
+            var last: [ItemID]?
+            for await albums in app.store.observeAlbums(sortedBy: .recentlyPlayed, limit: 24) {
+                let ids = albums.map(\.id)
+                if let last, last != ids { await reload() }
+                last = ids
+            }
         }
     }
 
@@ -58,16 +69,16 @@ private struct ShelfView: View {
     var body: some View {
         switch shelf.content {
         case .albums(let albums):
-            Shelf(title: shelf.title) { ForEach(albums) { AlbumCard(album: $0, width: 160) } }
+            Shelf(title: shelf.title) { ForEach(albums) { AlbumCard(album: $0, width: Metrics.shelfCard) } }
         case .stations(let stations):
             Shelf(title: shelf.title) {
                 ForEach(stations) { station in
                     Button { app.player.play(station) } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            ArtworkView(.station(station), cornerRadius: 12)
-                            Text(station.name).font(.subheadline).lineLimit(1)
+                            ArtworkView(.station(station), cornerRadius: Metrics.cardRadius)
+                            Text(station.name).font(.caption).lineLimit(1)
                         }
-                        .frame(width: 120)
+                        .frame(width: Metrics.shelfCard * 0.75)
                     }
                     .buttonStyle(.plain)
                     .contextMenu { StationMenu(station: station) }
@@ -90,8 +101,8 @@ private struct TrackShelf: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.title2.bold())
-                    if let subtitle { Text(subtitle).font(.subheadline).foregroundStyle(.secondary) }
+                    Text(title).font(Metrics.shelfTitle)
+                    if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary) }
                 }
                 Spacer()
                 Button { app.player.play(tracks, from: .songs) } label: {
@@ -99,23 +110,24 @@ private struct TrackShelf: View {
                 }
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.circle)
+                .controlSize(.small)
                 .accessibilityLabel("Play \(title)")
             }
-            .padding(.horizontal)
+            .padding(.horizontal, Metrics.pagePadding)
 
             ScrollView(.horizontal) {
-                LazyHGrid(rows: Array(repeating: GridItem(.fixed(56), spacing: 8), count: min(4, max(tracks.count, 1))), spacing: 18) {
+                LazyHGrid(rows: Array(repeating: GridItem(.fixed(Metrics.shelfRow), spacing: 2), count: min(4, max(tracks.count, 1))), spacing: Metrics.gridSpacing) {
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                         Button { app.player.play(tracks, startAt: index, from: .songs) } label: {
                             HStack(spacing: 10) {
-                                ArtworkView(.coverArt(track.coverArtID), cornerRadius: 4, size: 48)
+                                ArtworkView(.coverArt(track.coverArtID), cornerRadius: 4, size: Metrics.shelfRowArtwork)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(track.title).lineLimit(1)
-                                    Text(track.artist ?? "").font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                                    Text(track.artist ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
                             }
-                            .frame(width: 280, alignment: .leading)
+                            .frame(width: Metrics.shelfRowWidth, alignment: .leading)
                             .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
@@ -123,7 +135,7 @@ private struct TrackShelf: View {
                     }
                 }
                 .scrollTargetLayout()
-                .padding(.horizontal)
+                .padding(.horizontal, Metrics.pagePadding)
             }
             .scrollIndicators(.hidden)
             .scrollTargetBehavior(.viewAligned)
@@ -135,19 +147,19 @@ private struct ListenBrainzPromo: View {
     var body: some View {
         NavigationLink { SettingsView() } label: {
             HStack(spacing: 12) {
-                Image(systemName: "sparkles").font(.title2).foregroundStyle(.tint)
+                Image(systemName: "sparkles").font(.title3).foregroundStyle(.tint)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Get recommendations").font(.headline)
+                    Text("Get recommendations").font(.callout.weight(.semibold))
                     Text("Connect ListenBrainz in Settings for a For You shelf and Weekly Jams from your library.")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Image(systemName: "chevron.right").foregroundStyle(.tertiary)
             }
-            .padding()
-            .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 14))
+            .padding(Metrics.promoPadding)
+            .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: Metrics.promoRadius))
         }
         .buttonStyle(.plain)
-        .padding(.horizontal)
+        .padding(.horizontal, Metrics.pagePadding)
     }
 }

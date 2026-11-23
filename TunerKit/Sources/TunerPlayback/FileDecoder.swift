@@ -59,7 +59,9 @@ final class FileDecoder: PCMSource {
             out = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity)!
             var readError: Error?
             let status = converter.convert(to: out, error: nil) { [self] packets, inputStatus in
-                if inputExhausted {
+                // Reading at the end of a file throws, which would discard the audio already in `out`.
+                if inputExhausted || file.framePosition >= file.length {
+                    inputExhausted = true
                     inputStatus.pointee = .endOfStream
                     return nil
                 }

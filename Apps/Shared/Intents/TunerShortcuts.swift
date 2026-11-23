@@ -1,4 +1,5 @@
 import AppIntents
+import Foundation
 import TunerUI
 
 /// Siri phrases use `.applicationName`, so they follow the app's display name.
@@ -45,9 +46,16 @@ enum AppIntentsSetup {
     /// Registers the shared model before any intent runs, and keeps Siri and Spotlight current.
     static func configure(_ app: AppModel) {
         AppDependencyManager.shared.add(dependency: app)
-        let indexer = SpotlightIndexer(app: app)
-        indexer.start()
-        spotlight = indexer
+        var indexesSpotlight = true
+        #if DEBUG
+        // Test runs against a throwaway library shouldn't add it to the Mac's system search.
+        indexesSpotlight = ProcessInfo.processInfo.environment["TUNER_NO_SPOTLIGHT"] == nil
+        #endif
+        if indexesSpotlight {
+            let indexer = SpotlightIndexer(app: app)
+            indexer.start()
+            spotlight = indexer
+        }
         TunerShortcuts.updateAppShortcutParameters()
         Task {
             for await _ in app.store.observePlaylists() { TunerShortcuts.updateAppShortcutParameters() }

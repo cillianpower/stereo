@@ -12,6 +12,7 @@ struct SearchView: View {
     @State private var query = ""
     @State private var results = SearchResults()
     @State private var scope: Scope = .library
+    @FocusState private var isSearchFocused: Bool
 
     enum Scope: String, CaseIterable { case library = "Library", radio = "Radio" }
 
@@ -23,8 +24,22 @@ struct SearchView: View {
             }
         }
         .navigationTitle("Search")
+        #if os(macOS)
+        .pageHeader("Search") {
+            Picker("Search In", selection: $scope) {
+                ForEach(Scope.allCases, id: \.self) { Text($0.rawValue) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            MacFilterField(text: $query, prompt: scope == .library ? "Artists, albums, songs" : "Stations — try #jazz codec:flac",
+                           width: 260, focusRequests: app.shell.searchRequests, focusOnAppear: true)
+        }
+        #else
         .searchable(text: $query, prompt: scope == .library ? "Artists, albums, songs" : "Stations — try #jazz codec:flac")
+        .searchFocused($isSearchFocused)
         .searchScopes($scope) { ForEach(Scope.allCases, id: \.self) { Text($0.rawValue) } }
+        #endif
         .task(id: query) {
             guard scope == .library else { return }
             // Local FTS is instant; the server only fills gaps (e.g. before the first sync finishes).
@@ -50,7 +65,7 @@ struct SearchView: View {
                     ForEach(results.albums) { album in
                         NavigationLink(value: Route.album(album.id)) {
                             HStack(spacing: 12) {
-                                ArtworkView(.coverArt(album.coverArtID), cornerRadius: 4, size: 44)
+                                ArtworkView(.coverArt(album.coverArtID), cornerRadius: 4, size: Metrics.listArtwork)
                                 VStack(alignment: .leading) {
                                     Text(album.name).lineLimit(1)
                                     Text(album.artist ?? "").font(.caption).foregroundStyle(.secondary)
@@ -94,10 +109,20 @@ struct RadioView: View {
             if query.isEmpty { browse } else { RadioSearchResults(query: query) }
         }
         .navigationTitle("Radio")
+        #if os(macOS)
+        .pageHeader("Radio") {
+            MacFilterField(text: $query, prompt: "Stations — try #jazz bitrate>=256", width: 260)
+            Button { addingCustom = true } label: { Label("Add Station URL", systemImage: "plus") }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.glass)
+                .help("Add Station URL")
+        }
+        #else
         .searchable(text: $query, prompt: "Stations — try #jazz bitrate>=256")
         .toolbar {
             Button { addingCustom = true } label: { Label("Add Station URL", systemImage: "plus") }
         }
+        #endif
         .sheet(isPresented: $addingCustom) { AddStationSheet() }
         .task { for await v in app.store.observeFavoriteStations() { favorites = v } }
         .task { for await v in app.store.observeRecentStations(limit: 10) { recents = v } }

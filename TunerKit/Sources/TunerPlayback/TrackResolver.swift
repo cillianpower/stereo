@@ -34,8 +34,8 @@ public actor TrackCache {
 
     public func file(for key: String, ext: String) -> URL? {
         let url = directory.appending(path: Self.fileName(for: key, ext: ext))
-        guard FileManager.default.fileExists(atPath: url.path()) else { return nil }
-        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path())
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return nil }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path(percentEncoded: false))
         return url
     }
 

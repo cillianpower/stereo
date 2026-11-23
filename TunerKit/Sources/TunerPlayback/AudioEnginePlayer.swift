@@ -231,7 +231,7 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
             return try FileDecoder(item: item, url: url, outputFormat: format, startAt: offset, chunkFrames: chunkFrames)
         case .stream(let spec):
             // Already fully downloaded (by us earlier, or by a prefetch)? Play the file.
-            if !spec.isLive, let local = spec.completion.finalURL, FileManager.default.fileExists(atPath: local.path()) {
+            if !spec.isLive, let local = spec.completion.finalURL, FileManager.default.fileExists(atPath: local.path(percentEncoded: false)) {
                 return try FileDecoder(item: item, url: local, outputFormat: format, startAt: offset, chunkFrames: chunkFrames)
             }
             let decoder = try StreamDecoder(item: item, spec: spec, outputFormat: format, startAt: offset,

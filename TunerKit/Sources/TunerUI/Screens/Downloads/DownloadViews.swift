@@ -19,7 +19,7 @@ struct DownloadButton: View {
             if progress == nil { pin() } else { confirming = true }
         } label: {
             icon
-                .frame(width: 24, height: 24)
+                .frame(width: Metrics.actionIcon, height: Metrics.actionIcon)
                 .contentTransition(.symbolEffect(.replace))
         }
         .accessibilityLabel(accessibilityLabel)
@@ -134,11 +134,19 @@ struct DownloadedView: View {
             }
         }
         .navigationTitle("Downloaded")
+        #if os(macOS)
+        .pageHeader("Downloaded") {
+            if !pins.isEmpty {
+                Button { playAll() } label: { Label("Shuffle All", systemImage: "shuffle") }.buttonStyle(.glass)
+            }
+        }
+        #else
         .toolbar {
             if !pins.isEmpty {
                 Button { playAll() } label: { Label("Shuffle All", systemImage: "shuffle") }
             }
         }
+        #endif
         .task { for await value in app.store.observePins() { pins = value } }
         .task { for await value in app.store.observeDownloadStats() { stats = value } }
     }

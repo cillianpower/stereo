@@ -19,6 +19,7 @@ public struct ArtworkView: View {
     var size: CGFloat?
 
     @State private var image: CGImage?
+    @State private var pixels = 0
 
     public init(_ source: Source, cornerRadius: CGFloat = 8, size: CGFloat? = nil) {
         self.source = source
@@ -27,8 +28,9 @@ public struct ArtworkView: View {
     }
 
     public var body: some View {
-        GeometryReader { geo in
-            ZStack {
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
                 if let image {
                     Image(decorative: image, scale: 1)
                         .resizable()
@@ -38,20 +40,23 @@ public struct ArtworkView: View {
                     placeholder
                 }
             }
-            .frame(width: geo.size.width, height: geo.size.width)
             .clipShape(.rect(cornerRadius: cornerRadius))
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(.primary.opacity(0.08), lineWidth: 0.5)
             }
-            .task(id: TaskKey(source: source, width: geo.size.width)) {
-                await load(points: geo.size.width)
+            // Only a change of size bucket reloads, so resizing the window doesn't refetch art.
+            .onGeometryChange(for: Int.self) { proxy in
+                proxy.size.width > 0 ? ArtworkPipeline.bucket(for: proxy.size.width, scale: scale) : 0
+            } action: { bucket in
+                pixels = bucket
+                // Cached art is ready before the first frame, so it never flashes a placeholder.
+                if image == nil, bucket > 0, let hit = app.cachedArtwork(for: source, pixels: bucket) { image = hit }
             }
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .frame(width: size, height: size)
+            .task(id: TaskKey(source: source, pixels: pixels)) { await load() }
+            .frame(width: size, height: size)
     }
 
-    private struct TaskKey: Hashable { let source: Source; let width: CGFloat }
+    private struct TaskKey: Hashable { let source: Source; let pixels: Int }
 
     private var placeholder: some View {
         ZStack {
@@ -67,21 +72,46 @@ public struct ArtworkView: View {
         return "music.note"
     }
 
-    private func load(points: CGFloat) async {
-        guard points > 0 else { return }
-        let px = ArtworkPipeline.bucket(for: points, scale: scale)
-        let app = self.app
-        let loaded: CGImage?
+    private func load() async {
+        guard pixels > 0 else { return }
+        if let hit = app.cachedArtwork(for: source, pixels: pixels) {
+            image = hit
+            return
+        }
+        let loaded = await app.artworkImage(for: source, pixels: pixels)
+        // A view that scrolled away keeps what it has rather than clearing to a placeholder.
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeOut(duration: 0.18)) { image = loaded }
+    }
+}
+
+extension ArtworkView.Source {
+    var cacheKey: String? {
+        switch self {
+        case .coverArt(let id): id.map { "cover:\($0)" }
+        case .station(let station): "station:\(station.id)"
+        case .url(_, let key): key
+        }
+    }
+}
+
+extension AppModel {
+    func cachedArtwork(for source: ArtworkView.Source, pixels: Int) -> CGImage? {
+        source.cacheKey.flatMap { artwork.cachedImage(key: $0, size: pixels) }
+    }
+
+    func artworkImage(for source: ArtworkView.Source, pixels: Int) async -> CGImage? {
+        guard let key = source.cacheKey else { return nil }
         switch source {
         case .coverArt(let id):
-            guard let id else { image = nil; return }
-            loaded = await app.artwork.image(key: "cover:\(id)", size: px) { await app.coverArtURL(id, size: px) }
-        case .station(let s):
-            loaded = await app.artwork.image(key: "station:\(s.id)", size: px) { s.faviconURL }
-        case .url(let url, let key):
-            loaded = await app.artwork.image(key: key, size: px) { url }
+            guard let id else { return nil }
+            return await artwork.image(key: key, size: pixels) { await self.coverArtURL(id, size: pixels) }
+        case .station(let station):
+            let url = station.faviconURL
+            return await artwork.image(key: key, size: pixels) { url }
+        case .url(let url, _):
+            return await artwork.image(key: key, size: pixels) { url }
         }
-        withAnimation(.easeOut(duration: 0.2)) { image = loaded }
     }
 }
 
@@ -114,9 +144,13 @@ enum Format {
 
     static func formatDetail(_ f: AudioFormat) -> String {
         var parts: [String] = []
-        if let c = f.codec { parts.append(c.uppercased()) }
-        if let b = f.bitDepth, let r = f.sampleRate { parts.append("\(b)-bit/\(String(format: "%g", Double(r) / 1000)) kHz") }
-        else if let br = f.bitRate { parts.append("\(br) kbps") }
+        if let codec = f.codec, !codec.isEmpty { parts.append(codec.uppercased()) }
+        // Lossy files report a bit depth of zero, so depth only appears when it means something.
+        if let depth = f.bitDepth, depth > 0 { parts.append("\(depth)-bit") }
+        if let rate = f.sampleRate, rate > 0 {
+            parts.append((Double(rate) / 1000).formatted(.number.precision(.fractionLength(0...1))) + " kHz")
+        }
+        if !f.isLossless, let bitRate = f.bitRate, bitRate > 0 { parts.append("\(bitRate) kbps") }
         return parts.joined(separator: " · ")
     }
 }
@@ -208,31 +242,141 @@ struct TrackMenu: View {
 }
 
 struct AlbumCard: View {
+    @Environment(AppModel.self) private var app
     let album: Album
     var width: CGFloat?
+    @State private var isHovering = false
+    #if os(macOS)
+    @Environment(\.usesAlbumHero) private var usesAlbumHero
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Updated while scrolling without redrawing the card; only read on click.
+    @State private var artFrame = ArtFrame()
+    private final class ArtFrame { var rect = CGRect.zero }
+    #endif
+
+    /// In the main window the artwork flies to the album page. Other windows use a plain link.
+    @ViewBuilder
+    private func albumLink<Label: View>(@ViewBuilder label: () -> Label) -> some View {
+        #if os(macOS)
+        if usesAlbumHero {
+            Button {
+                app.shell.openAlbum(album.id, coverArtID: album.coverArtID, from: artFrame.rect, animated: !reduceMotion)
+            } label: { label() }
+        } else {
+            NavigationLink(value: Route.album(album.id)) { label() }
+        }
+        #else
+        NavigationLink(value: Route.album(album.id)) { label() }
+        #endif
+    }
 
     var body: some View {
-        NavigationLink(value: Route.album(album.id)) {
-            VStack(alignment: .leading, spacing: 6) {
-                ArtworkView(.coverArt(album.coverArtID))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(album.name).font(.subheadline).lineLimit(1).foregroundStyle(.primary)
-                    Text(album.artist ?? "").font(.subheadline).lineLimit(1).foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 5) {
+            albumLink {
+                ArtworkView(.coverArt(album.coverArtID), cornerRadius: Metrics.cardRadius)
             }
-            .frame(width: width)
-            .contentShape(.rect)
+            .buttonStyle(.plain)
+            #if os(macOS)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { artFrame.rect = $0 }
+            .overlay(alignment: .bottomTrailing) {
+                AlbumCardPlayButton(album: album, isHovering: isHovering)
+            }
+            .hoverLift()
+            #endif
+            albumLink {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(album.name).font(.caption.weight(.medium)).lineLimit(1).foregroundStyle(.primary)
+                    Text(album.artist ?? "").font(.caption).lineLimit(1).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .frame(width: width)
+        .contentShape(.rect)
+        .onHover { hovering in withAnimation(Motion.hover) { isHovering = hovering } }
         .contextMenu { AlbumMenu(album: album) }
     }
 }
 
+#if os(macOS)
+/// Plays the album, then shows and controls its state. Separate from the card so that playback
+/// changes only redraw this button.
+private struct AlbumCardPlayButton: View {
+    @Environment(AppModel.self) private var app
+    let album: Album
+    let isHovering: Bool
+    @State private var isStarting = false
+    @State private var showsSpinner = false
+
+    private var isCurrent: Bool {
+        if case .track(let track) = app.player.nowPlaying { return track.albumID == album.id }
+        return false
+    }
+
+    /// Only a real start counts. Streaming rebuffers briefly and often, which would make it flicker.
+    private var wantsSpinner: Bool { isStarting || (isCurrent && app.player.status == .loading) }
+
+    private var isPlaying: Bool { isCurrent && app.player.isPlaying }
+
+    var body: some View {
+        if isHovering || isCurrent || isStarting {
+            Button(action: activate) {
+                Group {
+                    if showsSpinner {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.caption)
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+                }
+                .frame(width: Metrics.cardPlayButton, height: Metrics.cardPlayButton)
+                .contentShape(.circle)
+                // A quick start never shows a spinner at all.
+                .task(id: wantsSpinner) {
+                    guard wantsSpinner else { showsSpinner = false; return }
+                    try? await Task.sleep(for: .milliseconds(350))
+                    if !Task.isCancelled { showsSpinner = true }
+                }
+            }
+            .buttonStyle(.plain)
+            .glassEffect(isCurrent ? .regular.tint(.accentColor.opacity(0.55)).interactive() : .regular.interactive(), in: .circle)
+            .padding(5)
+            .transition(.scale(scale: 0.6).combined(with: .opacity))
+            .help(isPlaying ? "Pause" : "Play")
+            .accessibilityLabel("\(isPlaying ? "Pause" : "Play") \(album.name)")
+        }
+    }
+
+    private func activate() {
+        guard !isStarting else { return }
+        if isCurrent {
+            app.toggleTransport()
+            return
+        }
+        isStarting = true
+        Task {
+            await app.play(album: album.id)
+            isStarting = false
+        }
+    }
+}
+#endif
+
 struct AlbumMenu: View {
     @Environment(AppModel.self) private var app
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
     let album: Album
 
     var body: some View {
+        #if os(macOS)
+        Button { openWindow(value: Route.album(album.id)) } label: { Label("Open in New Window", systemImage: "macwindow.badge.plus") }
+        Divider()
+        #endif
         Button { Task { await app.play(album: album.id) } } label: { Label("Play", systemImage: "play") }
         Button { Task { await app.play(album: album.id, shuffled: true) } } label: { Label("Shuffle", systemImage: "shuffle") }
         Button {
@@ -260,7 +404,7 @@ struct StationRow: View {
     var body: some View {
         Button { app.player.play(station) } label: {
             HStack(spacing: 12) {
-                ArtworkView(.station(station), cornerRadius: 8, size: 48)
+                ArtworkView(.station(station), cornerRadius: Metrics.cardRadius, size: Metrics.stationArtwork)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(station.name).lineLimit(1)
                         .foregroundStyle(isCurrent ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
@@ -312,13 +456,15 @@ struct Shelf<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.title2.bold()).padding(.horizontal)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(Metrics.shelfTitle).padding(.horizontal, Metrics.pagePadding)
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 14) { content }
+                LazyHStack(alignment: .top, spacing: Metrics.gridSpacing) { content }
                     .scrollTargetLayout()
-                    .padding(.horizontal)
+                    .padding(.horizontal, Metrics.pagePadding)
+                    .padding(.vertical, 6)   // room for the hover lift and its shadow
             }
+            .scrollClipDisabled()
             .scrollIndicators(.hidden)
             .scrollTargetBehavior(.viewAligned)
         }
