@@ -34,10 +34,10 @@ struct AppShell: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            Tab("Home", systemImage: "house", value: .home) { stack(.home) { HomeView() } }
-            Tab("Radio", systemImage: "dot.radiowaves.left.and.right", value: .radio) { stack(.radio) { RadioView() } }
-            Tab("Library", systemImage: "square.stack.fill", value: .library) { stack(.library) { LibraryView() } }
-            Tab(value: .search, role: .search) { stack(.search) { SearchView() } }
+            Tab("Home", systemImage: "house", value: .home) { stack(.home, title: "Home") { HomeView() } }
+            Tab("Radio", systemImage: "dot.radiowaves.left.and.right", value: .radio) { stack(.radio, title: "Radio") { RadioView() } }
+            Tab("Library", systemImage: "square.stack.fill", value: .library) { stack(.library, title: "Library") { LibraryView() } }
+            Tab(value: .search, role: .search) { stack(.search, title: "Search") { SearchView() } }
         }
         .tabViewStyle(.sidebarAdaptable)
         .onChange(of: app.pendingDestination, initial: true) { _, destination in
@@ -66,14 +66,26 @@ struct AppShell: View {
         #endif
     }
 
-    private func stack<Content: View>(_ id: TabID, @ViewBuilder _ content: () -> Content) -> some View {
+    private func stack<Content: View>(_ id: TabID, title: String, @ViewBuilder _ content: () -> Content) -> some View {
         NavigationStack(path: Binding(get: { paths[id] ?? NavigationPath() }, set: { paths[id] = $0 })) {
             content()
                 .tunerDestinations()
                 #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar(removing: .title)
+                .pageTopFade()
                 .toolbar {
+                    // A fixed title in the bar, so it doesn't collapse as the page scrolls.
+                    ToolbarItem(placement: .topBarLeading) {
+                        Text(title)
+                            .font(.title2.bold())
+                            .fixedSize()
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
                     ToolbarItem(placement: .topBarTrailing) {
-                        NavigationLink { SettingsView() } label: { Image(systemName: "person.crop.circle") }
+                        NavigationLink { SettingsView().pageTopFade() } label: { Image(systemName: "person.crop.circle") }
+                            .accessibilityLabel("Settings")
                     }
                 }
                 #endif

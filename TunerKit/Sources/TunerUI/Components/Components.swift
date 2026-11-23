@@ -365,6 +365,37 @@ private struct AlbumCardPlayButton: View {
 }
 #endif
 
+/// A few lines about an album or artist, which open up in place.
+struct AboutBlurb: View {
+    let title: String
+    let text: String
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(Metrics.shelfTitle)
+            Text(text)
+                #if os(macOS)
+                .font(.callout)
+                .textSelection(.enabled)
+                #else
+                .font(.subheadline)
+                #endif
+                .foregroundStyle(.secondary)
+                .lineLimit(isExpanded ? nil : 4)
+            if text.count > 180 {
+                Button(isExpanded ? "Less" : "More") {
+                    withAnimation(Motion.page) { isExpanded.toggle() }
+                }
+                .buttonStyle(.plain)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.tint)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct AlbumMenu: View {
     @Environment(AppModel.self) private var app
     #if os(macOS)

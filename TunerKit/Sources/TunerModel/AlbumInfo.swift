@@ -49,3 +49,14 @@ public struct AlbumInfo: Hashable, Codable, Sendable {
         return text.isEmpty ? nil : text
     }
 }
+
+/// A server's description of an artist, usually from Last.fm.
+public struct ArtistInfo: Hashable, Codable, Sendable {
+    public var biography: String?
+    public var lastFmURL: URL?
+    public var musicBrainzID: String?
+
+    public init(biography: String? = nil, lastFmURL: URL? = nil, musicBrainzID: String? = nil) {
+        self.biography = biography; self.lastFmURL = lastFmURL; self.musicBrainzID = musicBrainzID
+    }
+}

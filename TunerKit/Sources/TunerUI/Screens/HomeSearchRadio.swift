@@ -141,7 +141,7 @@ struct RadioView: View {
                 Section("Favorites") { ForEach(favorites) { StationRow(station: $0) } }
             }
             Section {
-                NavigationLink { IdentifiedSongsView() } label: { Label("Identified Songs", systemImage: "shazam.logo") }
+                NavigationLink { IdentifiedSongsView() } label: { Label("Heard on Radio", systemImage: "waveform") }
             }
             if !recents.isEmpty {
                 Section("Recently Played") { ForEach(recents) { StationRow(station: $0) } }
@@ -149,15 +149,34 @@ struct RadioView: View {
             if !tags.isEmpty {
                 Section("Genres") {
                     ScrollView(.horizontal) {
-                        HStack {
+                        HStack(spacing: 8) {
                             ForEach(tags) { tag in
                                 Button("#\(tag.name)") { query = "#\(tag.name)" }
                                     .buttonStyle(.bordered)
                                     .buttonBorderShape(.capsule)
+                                    // Tags blur in and out as they reach the sides.
+                                    .scrollTransition(.interactive.threshold(.visible(0.92)), axis: .horizontal) { view, phase in
+                                        view
+                                            .blur(radius: phase.isIdentity ? 0 : 5)
+                                            .opacity(phase.isIdentity ? 1 : 0.35)
+                                            .scaleEffect(phase.isIdentity ? 1 : 0.94)
+                                    }
                             }
                         }
+                        .padding(.vertical, 3)
                     }
+                    .contentMargins(.horizontal, 18, for: .scrollContent)
                     .scrollIndicators(.hidden)
+                    .mask {
+                        LinearGradient(stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black, location: 0.07),
+                            .init(color: .black, location: 0.93),
+                            .init(color: .clear, location: 1),
+                        ], startPoint: .leading, endPoint: .trailing)
+                    }
+                    .listRowInsets(.init())
+                    .listRowBackground(Color.clear)
                 }
             }
             Section("Popular") {

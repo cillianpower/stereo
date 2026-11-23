@@ -155,6 +155,15 @@ struct AlbumInfoBody: Decodable {
     let albumInfo: Info?
 }
 
+struct ArtistInfoBody: Decodable {
+    struct Info: Decodable {
+        let biography: String?
+        let musicBrainzId: String?
+        let lastFmUrl: String?
+    }
+    let artistInfo2: Info?
+}
+
 struct ArtistsBody: Decodable {
     struct Index: Decodable { let name: String; let artist: [ArtistDTO]? }
     struct Artists: Decodable { let index: [Index]? }

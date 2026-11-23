@@ -27,6 +27,8 @@ struct RouteDestination: View {
             .safeAreaPadding(.leading, isInMainWindow ? app.shell.railWidth : 0)
             .navigationBarBackButtonHidden(isInMainWindow)
             .environment(\.usesAlbumHero, isInMainWindow)
+            #else
+            .pageTopFade()
             #endif
     }
 
@@ -58,45 +60,85 @@ struct LibraryView: View {
     @State private var recent: [Album] = []
 
     var body: some View {
-        List {
-            Section {
-                NavigationLink(value: Route.playlists) { Label("Playlists", systemImage: "music.note.list") }
-                NavigationLink(value: Route.artists) { Label("Artists", systemImage: "music.microphone") }
-                NavigationLink(value: Route.albums) { Label("Albums", systemImage: "square.stack") }
-                NavigationLink { AlbumsView(title: "Recently Played", initialSort: .recentlyPlayed) } label: {
-                    Label("Recently Played", systemImage: "clock.arrow.circlepath")
+        ScrollView {
+            VStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
+                VStack(spacing: 0) {
+                    NavigationLink(value: Route.playlists) { rowLabel("Playlists", symbol: "music.note.list") }
+                    rowDivider
+                    NavigationLink(value: Route.artists) { rowLabel("Artists", symbol: "music.microphone") }
+                    rowDivider
+                    NavigationLink(value: Route.albums) { rowLabel("Albums", symbol: "square.stack") }
+                    rowDivider
+                    NavigationLink {
+                        AlbumsView(title: "Recently Played", initialSort: .recentlyPlayed).pageTopFade()
+                    } label: { rowLabel("Recently Played", symbol: "clock.arrow.circlepath") }
+                    rowDivider
+                    NavigationLink(value: Route.favoriteSongs) { rowLabel("Favorite Songs", symbol: "star") }
+                    rowDivider
+                    NavigationLink { DownloadedView().pageTopFade() } label: { rowLabel("Downloaded", symbol: "arrow.down.circle") }
                 }
-                NavigationLink(value: Route.favoriteSongs) { Label("Favorite Songs", systemImage: "star") }
-                NavigationLink { DownloadedView() } label: { Label("Downloaded", systemImage: "arrow.down.circle") }
-            }
-            .font(.title3)
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .background(.quaternary.opacity(0.45), in: .rect(cornerRadius: 14))
 
-            if let progress = app.syncProgress {
-                Section {
+                if let progress = app.syncProgress {
                     HStack {
                         ProgressView()
-                        Text("Syncing \(progress.phase)…").foregroundStyle(.secondary)
+                        Text("Syncing \(progress.phase)…").font(.subheadline).foregroundStyle(.secondary)
                         Spacer()
-                        if let total = progress.albumsTotal { Text("\(progress.albumsDone)/\(total)").monospacedDigit().foregroundStyle(.secondary) }
+                        if let total = progress.albumsTotal {
+                            Text("\(progress.albumsDone)/\(total)").font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+                        }
                     }
                 }
-            }
 
-            if !recent.isEmpty {
-                Section("Recently Added") {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 20) {
-                        ForEach(recent) { AlbumCard(album: $0) }
+                if !recent.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Recently Added").font(.headline)
+                            Spacer()
+                            NavigationLink("See All") {
+                                AlbumsView(title: "Recently Added", initialSort: .recentlyAdded).pageTopFade()
+                            }
+                            .font(.subheadline)
+                        }
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Metrics.gridSpacing)], spacing: Metrics.gridRowSpacing) {
+                            ForEach(recent) { AlbumCard(album: $0) }
+                        }
                     }
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(.init(top: 8, leading: 16, bottom: 8, trailing: 16))
                 }
             }
+            .padding(.horizontal, Metrics.pagePadding)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
         }
         .navigationTitle("Library")
         .task {
-            for await albums in app.store.observeAlbums(sortedBy: .recentlyAdded, limit: 24) { recent = albums }
+            for await albums in app.store.observeAlbums(sortedBy: .recentlyAdded, limit: Self.recentLimit) { recent = albums }
         }
         .refreshable { await app.sync() }
+    }
+
+    private static let recentLimit = 12
+
+    private var rowDivider: some View {
+        Divider().padding(.leading, 36)
+    }
+
+    private func rowLabel(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.body)
+                .foregroundStyle(.tint)
+                .frame(width: 24)
+            Text(title).font(.subheadline.weight(.medium))
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(height: 44)
+        .contentShape(.rect)
     }
 }
 
@@ -223,6 +265,9 @@ struct AlbumDetailView: View {
                         }
                     }
                     footer(detail).listRowSeparator(.hidden)
+                    if let notes = info?.notes {
+                        AboutBlurb(title: "About", text: notes).listRowSeparator(.hidden)
+                    }
                 }
                 .listStyle(.plain)
                 #endif
@@ -249,10 +294,8 @@ struct AlbumDetailView: View {
         .task {
             detail = await app.albumDetail(albumID)
             failed = detail == nil
-            #if os(macOS)
             let loaded = await app.albumInfo(albumID)
             withAnimation(Motion.page) { info = loaded }
-            #endif
         }
     }
 
@@ -337,6 +380,7 @@ struct ArtistDetailView: View {
     @State private var name = ""
     @State private var albums: [Album] = []
     @State private var top: [Track] = []
+    @State private var info: ArtistInfo?
 
     private var shuffleButton: some View {
         Button {
@@ -370,6 +414,10 @@ struct ArtistDetailView: View {
                     }
                     .padding(.horizontal)
                 }
+                if let biography = info?.biography {
+                    AboutBlurb(title: name.isEmpty ? "About" : "About \(name)", text: biography)
+                        .padding(.horizontal)
+                }
             }
             .padding(.vertical)
         }
@@ -387,6 +435,10 @@ struct ArtistDetailView: View {
                 albums = detail.albums.sorted { ($0.year ?? 0) > ($1.year ?? 0) }
                 top = (try? await app.library?.topSongs(artistName: detail.artist.name)) ?? []
             }
+        }
+        .task(id: artistID) {
+            let loaded = await app.artistInfo(artistID)
+            withAnimation(Motion.page) { info = loaded }
         }
     }
 }

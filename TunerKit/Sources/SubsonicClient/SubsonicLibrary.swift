@@ -132,6 +132,16 @@ public actor SubsonicLibrary: LibrarySource {
         return ArtistDetail(artist: map(body.artist), albums: (body.artist.album ?? []).map(map))
     }
 
+    public func artistInfo(_ artistID: ItemID) async throws -> ArtistInfo {
+        let body = try await get(ArtistInfoBody.self, "getArtistInfo2", [.init(name: "id", value: try raw(artistID))])
+        let info = body.artistInfo2
+        return ArtistInfo(
+            biography: AlbumInfo.plainText(fromHTML: info?.biography),
+            lastFmURL: info?.lastFmUrl.flatMap { $0.isEmpty ? nil : URL(string: $0) },
+            musicBrainzID: info?.musicBrainzId.flatMap { $0.isEmpty ? nil : $0 }
+        )
+    }
+
     public func topSongs(artistName: String, count: Int = 10) async throws -> [Track] {
         let body = try await get(TopSongsBody.self, "getTopSongs", [
             .init(name: "artist", value: artistName), .init(name: "count", value: String(count)),

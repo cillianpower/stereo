@@ -64,7 +64,7 @@ struct IdentificationBanner: View {
     }
 }
 
-/// History of identified songs, for the Radio tab.
+/// Songs identified while listening to radio. Kept in Tuner only: nothing is added to the Shazam app.
 struct IdentifiedSongsView: View {
     @Environment(AppModel.self) private var app
     @State private var songs: [IdentifiedSong] = []
@@ -86,8 +86,9 @@ struct IdentifiedSongsView: View {
                 }
             }
         }
-        .overlay { if songs.isEmpty { ContentUnavailableView("No Identified Songs", systemImage: "shazam.logo", description: Text("Tap the Shazam button in Now Playing.")) } }
-        .navigationTitle("Identified")
+        .overlay { if songs.isEmpty { ContentUnavailableView("Nothing Heard Yet", systemImage: "waveform", description: Text("Songs you identify while listening to radio are saved here, in Tuner.")) } }
+        .navigationTitle("Heard on Radio")
+        .pageTopFade()
         .task(id: app.identification) { songs = (try? app.store.identifiedSongs()) ?? [] }
     }
 }

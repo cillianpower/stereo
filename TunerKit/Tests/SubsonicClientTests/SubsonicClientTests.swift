@@ -57,6 +57,13 @@ private func query(_ request: URLRequest) -> [String: String] {
         #expect(info.musicBrainzID == "9f2f4e1a-4bb8-4c0e-9d7f-111111111111")
     }
 
+    @Test func artistBiographyIsReadableText() async throws {
+        let library = makeLibrary(FixtureTransport())
+        let info = try await library.artistInfo(ItemID(source: library.id, raw: "ar-1"))
+        #expect(info.biography == "A \"pioneering\" duo & label.\nFormed in 1987.")
+        #expect(info.lastFmURL?.host() == "www.last.fm")
+    }
+
     @Test func aServerWithoutExtrasStillReturnsInfo() async throws {
         let transport = FixtureTransport()
         transport.overrides["getAlbumInfo2"] = "missing"

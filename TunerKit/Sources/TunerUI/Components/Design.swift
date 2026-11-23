@@ -212,7 +212,47 @@ struct MacHeaderFade: ViewModifier {
 }
 #endif
 
+#if os(iOS)
+/// Pages scroll under a see-through fade, so the header never turns into a separate bar.
+private struct PageTopFade: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .scrollEdgeEffectHidden(true, for: .top)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .overlay(alignment: .top) {
+                GeometryReader { geometry in
+                    let height = geometry.safeAreaInsets.top + 20
+                    Rectangle()
+                        .fill(.thinMaterial)
+                        .mask {
+                            // Solid behind the title so scrolling text can't compete with it.
+                            LinearGradient(stops: [
+                                .init(color: .black, location: 0),
+                                .init(color: .black, location: 0.72),
+                                .init(color: .clear, location: 1),
+                            ], startPoint: .top, endPoint: .bottom)
+                        }
+                        .frame(height: height)
+                        .offset(y: -geometry.safeAreaInsets.top)
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+    }
+}
+#endif
+
 extension View {
+    /// The iPhone's header treatment. The Mac has its own, in `pageHeader`.
+    @ViewBuilder
+    func pageTopFade() -> some View {
+        #if os(iOS)
+        modifier(PageTopFade())
+        #else
+        self
+        #endif
+    }
+
     /// The Mac's page title row, with the page's own controls on the right. The top bar belongs to
     /// the player there. iOS keeps its navigation bar, so this does nothing on iPhone and iPad.
     @ViewBuilder

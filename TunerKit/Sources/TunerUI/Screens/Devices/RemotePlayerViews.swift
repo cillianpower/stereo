@@ -78,7 +78,7 @@ struct RemoteNowPlayingView: View {
             .background(Color.black)
 
             VStack(spacing: 20) {
-                Capsule().fill(.secondary).frame(width: 40, height: 5).padding(.top, 8).onTapGesture { dismiss() }
+                GrabBar { dismiss() }
                 Label("Playing on \(remote.controller?.device?.name ?? "")", systemImage: remote.controller?.device?.kind.symbolName ?? "hifispeaker")
                     .font(.footnote.weight(.semibold))
                     .padding(.horizontal, 12).padding(.vertical, 6)

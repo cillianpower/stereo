@@ -218,8 +218,7 @@ struct NowPlayingView: View {
         ZStack {
             background
             VStack(spacing: 20) {
-                Capsule().fill(.secondary).frame(width: 40, height: 5).padding(.top, 8)
-                    .onTapGesture { dismiss() }
+                GrabBar { dismiss() }
 
                 Group {
                     switch panel {
@@ -435,18 +434,22 @@ struct TouchScrubber: View {
     var body: some View {
         let shown = min(max((scrubbing ?? position) / duration, 0), 1)
         GeometryReader { geometry in
-            let thickness: CGFloat = scrubbing == nil ? 4 : 6
-            let head: CGFloat = scrubbing == nil ? 16 : 22
-            // The head stops at the ends of the bar rather than hanging past them.
-            let headX = max(geometry.size.width - head, 0) * shown
+            let isActive = scrubbing != nil
+            let thickness: CGFloat = isActive ? 6 : 4
+            let restWidth: CGFloat = 28
+            let headSize = isActive ? CGSize(width: 46, height: 30) : CGSize(width: restWidth, height: 18)
+            // Measured from a fixed width, so the head grows around the same point when touched.
+            let center = restWidth / 2 + max(geometry.size.width - restWidth, 0) * shown
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.25)).frame(height: thickness)
-                Capsule().fill(.tint).frame(width: headX + head / 2, height: thickness)
-                Circle()
-                    .fill(.white)
-                    .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
-                    .frame(width: head, height: head)
-                    .offset(x: headX)
+                Capsule().fill(.tint).frame(width: center, height: thickness)
+                // Solid at rest; under the finger it becomes a glass lens over the track.
+                Capsule()
+                    .fill(.white.opacity(isActive ? 0.14 : 1))
+                    .frame(width: headSize.width, height: headSize.height)
+                    .glassEffect(isActive ? .regular : .identity, in: .capsule)
+                    .shadow(color: .black.opacity(0.28), radius: 3, y: 1)
+                    .offset(x: center - headSize.width / 2)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .animation(Motion.hover, value: scrubbing == nil)
@@ -504,12 +507,29 @@ private struct SwipeDownToDismiss: ViewModifier {
     @State private var height: CGFloat = 900
     /// Decided once per drag: nil before the first movement.
     @State private var isTracking: Bool?
+    @State private var bend: CGFloat = 0
+    @State private var settle: Task<Void, Never>?
+    @State private var restInsets: EdgeInsets?
+    /// False from the start of a drag until the player is back at rest.
+    @State private var isSettled = true
+
+    private static let dragThreshold: CGFloat = 12
 
     func body(content: Content) -> some View {
-        content
+        // Laid out full screen before clipping, so the area under the status bar moves with the
+        // player instead of being cut off by the rounded corners.
+        GeometryReader { proxy in
+            content
+                .environment(\.grabBarBend, bend)
+                .safeAreaPadding(restInsets ?? proxy.safeAreaInsets)
+                .clipShape(.rect(cornerRadius: min(offset / 3, 44), style: .continuous))
+                .ignoresSafeArea()
+        }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-            .mask {
-                RoundedRectangle(cornerRadius: min(offset / 3, 44), style: .continuous).ignoresSafeArea()
+            // Moving away from the status bar shrinks the safe area, which would hold the content
+            // still while its top edge slid down. The insets stay as they were at rest instead.
+            .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets in
+                if isSettled { restInsets = insets }
             }
             .offset(y: offset)
             .simultaneousGesture(drag)
@@ -517,28 +537,55 @@ private struct SwipeDownToDismiss: ViewModifier {
     }
 
     private var drag: some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .global)
+        DragGesture(minimumDistance: Self.dragThreshold, coordinateSpace: .global)
             .onChanged { value in
                 let move = value.translation
                 let tracking = isTracking ?? (move.height > 0 && move.height > abs(move.width) * 1.2 && !isBlocked(value.startLocation))
                 isTracking = tracking
-                if tracking { offset = max(move.height, 0) }
+                if tracking {
+                    isSettled = false
+                    // Measured from where the drag was recognized, so the player doesn't jump.
+                    offset = max(move.height - Self.dragThreshold, 0)
+                    followDirection(velocity: value.velocity.height)
+                }
             }
             .onEnded { value in
                 let wasTracking = isTracking == true
                 isTracking = nil
                 guard wasTracking else { return }
                 // Short enough to work from the controls, which sit near the bottom of the screen.
+                settle?.cancel()
                 if value.translation.height > 100 || value.predictedEndTranslation.height > 320 {
+                    bend = 1
                     close()
                 } else {
-                    withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) { offset = 0 }
+                    // Heading back up, so the chevron says so until the player has settled.
+                    bend = offset > 4 ? -1 : 0
+                    settle = Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        if !Task.isCancelled { bend = 0 }
+                    }
+                    withAnimation(.spring(response: 0.46, dampingFraction: 0.9)) {
+                        offset = 0
+                    } completion: {
+                        if isTracking == nil { isSettled = true }
+                    }
                 }
             }
     }
 
+    /// Points the chevron the way the finger is moving, and flattens it when the finger stops.
+    private func followDirection(velocity: CGFloat) {
+        bend = abs(velocity) < 60 ? 0 : max(min(velocity / 450, 1), -1)
+        settle?.cancel()
+        settle = Task {
+            try? await Task.sleep(for: .milliseconds(110))
+            if !Task.isCancelled { bend = 0 }
+        }
+    }
+
     private func close() {
-        withAnimation(.easeOut(duration: 0.22)) {
+        withAnimation(.easeOut(duration: 0.3)) {
             offset = height + 120
         } completion: {
             // Already off screen, so the system's own slide would only replay it.
@@ -559,6 +606,59 @@ extension View {
         #else
         self
         #endif
+    }
+}
+
+extension EnvironmentValues {
+    /// The grab bar's chevron: 1 points down, -1 points up, and 0 is a flat bar.
+    @Entry var grabBarBend: CGFloat = 0
+}
+
+/// The grab bar at the top of the player. It's flat at rest and becomes a chevron pointing the way
+/// the player is moving: up as it arrives, then down or up with the finger.
+struct GrabBar: View {
+    @Environment(\.grabBarBend) private var dragBend
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isArriving = true
+    let onTap: () -> Void
+
+    var body: some View {
+        let bend = isArriving && !reduceMotion ? -1 : dragBend
+        Button(action: onTap) {
+            GrabBarShape(bend: bend)
+                .stroke(.secondary, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                .frame(width: 38, height: 9)
+                .padding(.horizontal, 24)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        // No bounce: the bar should read as bending, not wobbling.
+        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: bend)
+        .task {
+            try? await Task.sleep(for: .milliseconds(420))
+            isArriving = false
+        }
+        .accessibilityLabel("Close Now Playing")
+    }
+}
+
+private struct GrabBarShape: Shape {
+    var bend: CGFloat
+
+    var animatableData: CGFloat {
+        get { bend }
+        set { bend = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let depth = rect.height / 2 * bend
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY - depth))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.midY + depth))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY - depth))
+        return path
     }
 }
 
