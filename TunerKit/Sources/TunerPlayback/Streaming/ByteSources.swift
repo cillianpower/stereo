@@ -14,6 +14,8 @@ protocol ByteSource: AnyObject {
     var contentLength: Int64? { get }
     /// Moves the read position (absolute byte offset). May restart the download with a Range request.
     func seek(to offset: Int64)
+    /// Like `seek`, for a look at a few bytes: fetches a small range so the connection can be reused.
+    func probe(at offset: Int64)
     func cancel()
 }
 
@@ -61,6 +63,9 @@ final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate, @u
     private var completed = false
     private var taskStartedAt = Date()
     private var taskBytes: Int64 = 0
+    /// The running request is a small probe; the download continues from the read position after it.
+    private var isProbeTask = false
+    private static let probeBytes: Int64 = 64 * 1024
 
     init(request: URLRequest, queue: DispatchQueue, configuration: URLSessionConfiguration) throws {
         self.request = request
@@ -80,16 +85,22 @@ final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate, @u
         if !completed { try? FileManager.default.removeItem(at: fileURL) }
     }
 
-    private func start(at offset: Int64) {
+    private func start(at offset: Int64, length: Int64? = nil) {
         task?.cancel()
-        session?.invalidateAndCancel()
         var req = request
-        if offset > 0 { req.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") }
+        if let length {
+            req.setValue("bytes=\(offset)-\(offset + length - 1)", forHTTPHeaderField: "Range")
+        } else if offset > 0 {
+            req.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
+        }
         writeOffset = offset
         finishedTask = false
+        isProbeTask = length != nil
+        error = nil
         taskStartedAt = Date()
         taskBytes = 0
-        let session = makeEngineSession(configuration: configuration, delegate: self, queue: queue)
+        // One session for the whole track, so requests can share a connection.
+        let session = self.session ?? makeEngineSession(configuration: configuration, delegate: self, queue: queue)
         self.session = session
         let task = session.dataTask(with: req)
         self.task = task
@@ -105,7 +116,10 @@ final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate, @u
 
     func read(max: Int) -> Data? {
         let end = availableEnd(from: readOffset)
-        guard end > readOffset, let reader else { return nil }
+        guard end > readOffset, let reader else {
+            resumeIfStalled()
+            return nil
+        }
         let count = Int(min(Int64(max), end - readOffset))
         do {
             try reader.seek(toOffset: UInt64(readOffset))
@@ -139,6 +153,20 @@ final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate, @u
             start(at: offset)
         }
         // Otherwise the running download will get there.
+    }
+
+    func probe(at offset: Int64) {
+        readOffset = offset
+        if availableEnd(from: offset) > offset { onAvailable?(); return }
+        guard serverSupportsRanges else { return }   // the running download will get there
+        start(at: offset, length: Self.probeBytes)
+    }
+
+    /// After seeking back into a loaded stretch, reading can reach a gap the running request
+    /// has already passed (or no request is running). Fetch from the read position.
+    private func resumeIfStalled() {
+        guard serverSupportsRanges, error == nil, session != nil, let contentLength, readOffset < contentLength else { return }
+        if finishedTask || writeOffset > readOffset { start(at: readOffset) }
     }
 
     func cancel() {
@@ -183,6 +211,8 @@ final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate, @u
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        // A response from a request a newer seek replaced says nothing about the current one.
+        guard session === self.session, dataTask === task else { completionHandler(.cancel); return }
         guard let http = response as? HTTPURLResponse else { completionHandler(.allow); return }
         guard (200..<300).contains(http.statusCode) else {
             error = URLError(.badServerResponse, userInfo: ["status": http.statusCode])
@@ -198,6 +228,7 @@ final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate, @u
             if writeOffset > 0 {
                 // Server ignored our Range: it is sending from byte 0 again.
                 serverSupportsRanges = false
+                isProbeTask = false
                 writeOffset = 0
             }
             if http.expectedContentLength > 0 { contentLength = http.expectedContentLength }
@@ -207,7 +238,7 @@ final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate, @u
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard session === self.session, let writer else { return }
+        guard session === self.session, dataTask === task, let writer else { return }
         do {
             try writer.seek(toOffset: UInt64(writeOffset))
             try writer.write(contentsOf: data)
@@ -225,10 +256,18 @@ final class DownloadByteSource: NSObject, ByteSource, URLSessionDataDelegate, @u
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard session === self.session else { return }
+        guard session === self.session, task === self.task else { return }
         if let error = error as? URLError, error.code == .cancelled { return }
         finishedTask = true
-        if let error { self.error = error } else { checkComplete() }
+        if let error {
+            self.error = error
+        } else {
+            checkComplete()
+            if isProbeTask, !completed, let contentLength {
+                let next = availableEnd(from: readOffset)
+                if next < contentLength { start(at: next) }
+            }
+        }
         onAvailable?()
     }
 }
@@ -272,6 +311,7 @@ final class LiveByteSource: NSObject, ByteSource, URLSessionDataDelegate, @unche
     }
 
     func seek(to offset: Int64) {}   // live: no seeking
+    func probe(at offset: Int64) {}
 
     func cancel() {
         session?.invalidateAndCancel()

@@ -58,8 +58,9 @@ final class StreamDecoder: PCMSource {
     private var pendingSeek: TimeInterval?
     private var inputExhausted = false
     private var flushedParser = false
-    /// Set after a seek: the next bytes must be realigned to a verified FLAC frame header.
-    private var needsFLACResync = false
+    /// A FLAC seek in progress. No bytes reach the parser until it lands on the target frame.
+    private var flacSeek: FLACSeek?
+    private var isReading = false
     private var consecutiveDecodeErrors = 0
     private var finished = false
     private var failure: Error?
@@ -90,7 +91,11 @@ final class StreamDecoder: PCMSource {
         let status = AudioFileStreamOpen(Unmanaged.passUnretained(self).toOpaque(), propertyProc, packetsProc, hint, &streamID)
         guard status == noErr else { throw StreamDecoderError.parse(status) }
 
-        bytes.onAvailable = { [weak self] in self?.onReadable?() }
+        // A seek inside `read` can report data immediately; the running read loop will consume it.
+        bytes.onAvailable = { [weak self] in
+            guard let self, !self.isReading else { return }
+            self.onReadable?()
+        }
         if let live = bytes as? LiveByteSource {
             live.onMetadata = { [weak self] meta in self?.onMetadata?(meta) }
         }
@@ -111,6 +116,8 @@ final class StreamDecoder: PCMSource {
     func read(frames: AVAudioFrameCount) throws -> PCMRead {
         if let failure { throw failure }
         if finished { return .end }
+        isReading = true
+        defer { isReading = false }
 
         // Parse until there's about a second of audio queued, or we run out of bytes.
         let wanted = Int64(max(Double(frames) * 2, (inputFormat?.sampleRate ?? 44_100)))
@@ -237,10 +244,9 @@ final class StreamDecoder: PCMSource {
     private func parse(_ input: Data) throws {
         guard let streamID else { return }
         var chunk = input
-        if needsFLACResync {
-            guard let start = FLACFrameScanner.firstFrameHeader(in: chunk) else { return }   // keep looking in the next chunk
-            chunk = chunk.subdata(in: (chunk.startIndex + start)..<chunk.endIndex)
-            needsFLACResync = false
+        if flacSeek != nil {
+            guard let landed = advanceFLACSeek(chunk) else { return }   // still searching
+            chunk = landed
         }
         let flags: AudioFileStreamParseFlags = discontinuity ? .discontinuity : []
         discontinuity = false
@@ -349,6 +355,8 @@ final class StreamDecoder: PCMSource {
     /// real frame; the fake one never completes, so it's never emitted.
     private func flushParser() {
         flushedParser = true
+        // Reached the end while searching: the target is past the last frame.
+        flacSeek = nil
         guard asbd.mFormatID == kAudioFormatFLAC, let download = bytes as? DownloadByteSource,
               let header = download.peek(at: dataOffset, count: 32) else { return }
         try? parse(header)
@@ -356,10 +364,33 @@ final class StreamDecoder: PCMSource {
 
     // MARK: Seeking
 
+    func seek(to seconds: TimeInterval) -> Bool {
+        guard !spec.isLive else { return false }
+        isReading = true   // the engine calls `fill` itself after this returns
+        defer { isReading = false }
+        finished = false
+        inputExhausted = false
+        flushedParser = false
+        failure = nil
+        consecutiveDecodeErrors = 0
+        flacSeek = nil
+        if ready {
+            pendingSeek = nil
+            performSeek(to: seconds)
+        } else {
+            pendingSeek = seconds > 0 ? seconds : nil
+        }
+        return true
+    }
+
     private func performSeek(to seconds: TimeInterval) {
         guard let streamID, let inputFormat, let converter else { return }
         let rate = inputFormat.sampleRate
         let ratio = outputFormat.sampleRate / rate
+        if asbd.mFormatID == kAudioFormatFLAC {
+            startFLACSeek(to: seconds, rate: rate, ratio: ratio, converter: converter)
+            return
+        }
         let priming = Int64(packetTable?.mPrimingFrames ?? 0)
         let targetFrame = Int64(seconds * rate) + priming
         var byteOffset: Int64 = 0
@@ -393,9 +424,114 @@ final class StreamDecoder: PCMSource {
             framesRemaining = nil
         }
         discontinuity = true
-        needsFLACResync = asbd.mFormatID == kAudioFormatFLAC
         bytes.seek(to: dataOffset + byteOffset)
         log.debug("seek \(seconds)s → byte \(self.dataOffset + byteOffset)")
+    }
+
+    // MARK: FLAC seeking
+
+    /// FLAC frames vary in size, so a byte offset can't be calculated from a time. Each frame header
+    /// does state its sample number, so this narrows in on the target by probing byte offsets, then
+    /// scans the last stretch frame by frame.
+    private struct FLACSeek {
+        let target: Int64
+        var low: Int64
+        var lowSample: Int64
+        var high: Int64?
+        var highSample: Int64
+        /// Absolute offset of the next byte to arrive.
+        var position: Int64
+        /// Where the current probe started.
+        var probeStart: Int64
+        /// The end of the last chunk, in case a frame header straddles two chunks.
+        var carry = Data()
+        var probes = 0
+        var linear = false
+
+        static let maxProbes = 24
+        /// Below this gap, reading forward is cheaper than another request.
+        static let linearScanBytes: Int64 = 32 * 1024
+    }
+
+    private func startFLACSeek(to seconds: TimeInterval, rate: Double, ratio: Double, converter: AVAudioConverter) {
+        packetData.removeAll(keepingCapacity: true)
+        packetDescs.removeAll(keepingCapacity: true)
+        queuedFrames = 0
+        converter.reset()
+        framesToSkip = 0
+        if let pt = packetTable {
+            framesRemaining = Int64(Double(max(0, Int64(pt.mNumberValidFrames) - Int64(seconds * rate))) * ratio)
+        } else {
+            framesRemaining = nil
+        }
+        discontinuity = true
+        let target = Int64(seconds * rate)
+        flacSeek = FLACSeek(target: target, low: dataOffset, lowSample: 0, high: bytes.contentLength,
+                            highSample: max(Int64((spec.expectedDuration ?? 0) * rate), target + 1),
+                            position: dataOffset, probeStart: dataOffset)
+        probeFLAC()
+    }
+
+    /// Jumps to the next byte offset worth checking, or falls back to reading forward from `low`.
+    private func probeFLAC() {
+        guard var seek = flacSeek else { return }
+        seek.probes += 1
+        seek.carry = Data()
+        let next: Int64
+        if let high = seek.high, high - seek.low > FLACSeek.linearScanBytes, seek.probes <= FLACSeek.maxProbes {
+            // Interpolate, with a plain midpoint every third probe to guarantee progress.
+            let fraction = seek.probes % 3 == 0 ? 0.5
+                : Double(seek.target - seek.lowSample) / Double(max(seek.highSample - seek.lowSample, 1))
+            let guess = seek.low + Int64(Double(high - seek.low) * min(max(fraction, 0), 1))
+            next = min(max(guess, seek.low + 1), high - 1)
+        } else {
+            seek.linear = true
+            next = seek.low
+        }
+        seek.position = next
+        seek.probeStart = next
+        flacSeek = seek
+        bytes.probe(at: next)
+    }
+
+    /// Checks newly arrived bytes. Returns the data to parse once the target frame is found.
+    private func advanceFLACSeek(_ chunk: Data) -> Data? {
+        guard var seek = flacSeek, let inputFormat else { return chunk }
+        let data = seek.carry + chunk
+        let base = seek.position - Int64(seek.carry.count)
+        seek.position += Int64(chunk.count)
+        let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+
+        func land(at index: Int, skipping samples: Int64) -> Data {
+            framesToSkip = Int64(Double(samples) * ratio)
+            flacSeek = nil
+            return data.subdata(in: (data.startIndex + index)..<data.endIndex)
+        }
+
+        var from = 0
+        var foundFrame = false
+        while let (index, frame) = FLACFrameScanner.nextFrame(in: data, from: from, fixedBlockSize: Int64(asbd.mFramesPerPacket)) {
+            if frame.firstSample > seek.target {
+                // Out of attempts, or nothing earlier exists: this is the closest frame.
+                if seek.linear || seek.probes > FLACSeek.maxProbes { return land(at: index, skipping: 0) }
+                seek.high = seek.probeStart
+                seek.highSample = frame.firstSample
+                flacSeek = seek
+                probeFLAC()
+                return nil
+            }
+            if seek.target < frame.firstSample + frame.blockSize {
+                return land(at: index, skipping: seek.target - frame.firstSample)
+            }
+            seek.low = base + Int64(index)
+            seek.lowSample = frame.firstSample
+            foundFrame = true
+            from = index + 1
+        }
+        seek.carry = Data(data.suffix(32))
+        flacSeek = seek
+        if foundFrame, !seek.linear { probeFLAC() }
+        return nil
     }
 
     // MARK: Helpers
@@ -433,17 +569,58 @@ private func packetsProc(_ client: UnsafeMutableRawPointer, _ numberBytes: UInt3
 /// Finds real FLAC frame headers: sync code plus a valid CRC-8, so a byte pattern that merely
 /// looks like a sync inside audio data isn't mistaken for a frame start.
 enum FLACFrameScanner {
+    struct Frame: Equatable {
+        var firstSample: Int64
+        var blockSize: Int64
+    }
+
     static func firstFrameHeader(in data: Data) -> Int? {
-        data.withUnsafeBytes { raw -> Int? in
+        nextFrame(in: data, from: 0, fixedBlockSize: 0)?.index
+    }
+
+    /// The next verified frame at or after `from`, with the sample position its header states.
+    /// `fixedBlockSize` converts frame numbers to samples; 0 uses the frame's own block size.
+    static func nextFrame(in data: Data, from: Int, fixedBlockSize: Int64) -> (index: Int, frame: Frame)? {
+        data.withUnsafeBytes { raw -> (index: Int, frame: Frame)? in
             let b = raw.bindMemory(to: UInt8.self)
-            guard b.count >= 6 else { return nil }
-            for i in 0..<(b.count - 5) where b[i] == 0xFF && (b[i + 1] & 0xFE) == 0xF8 {
-                if let length = headerLength(b, at: i), i + length < b.count, crc8(b, from: i, count: length - 1) == b[i + length - 1] {
-                    return i
+            guard b.count >= 6, from < b.count - 5 else { return nil }
+            for i in from..<(b.count - 5) where b[i] == 0xFF && (b[i + 1] & 0xFE) == 0xF8 {
+                if let length = headerLength(b, at: i), i + length < b.count, crc8(b, from: i, count: length - 1) == b[i + length - 1],
+                   let frame = parseFrame(b, at: i, fixedBlockSize: fixedBlockSize) {
+                    return (i, frame)
                 }
             }
             return nil
         }
+    }
+
+    /// Call only on a header whose full length is in the buffer.
+    private static func parseFrame(_ b: UnsafeBufferPointer<UInt8>, at i: Int, fixedBlockSize: Int64) -> Frame? {
+        let first = b[i + 4]
+        var coded = Int64(first)
+        var codedLength = 1
+        if first & 0x80 != 0 {
+            codedLength = 2
+            var mask: UInt8 = 0x20
+            while first & mask != 0 && codedLength < 7 { codedLength += 1; mask >>= 1 }
+            coded = Int64(first) & (0xFF >> (codedLength + 1))
+            for k in 1..<codedLength {
+                guard b[i + 4 + k] & 0xC0 == 0x80 else { return nil }
+                coded = coded << 6 | Int64(b[i + 4 + k] & 0x3F)
+            }
+        }
+        let code = b[i + 2] >> 4
+        let afterNumber = i + 4 + codedLength
+        let blockSize: Int64 = switch code {
+        case 1: 192
+        case 2...5: 576 << Int64(code - 2)
+        case 6: Int64(b[afterNumber]) + 1
+        case 7: (Int64(b[afterNumber]) << 8 | Int64(b[afterNumber + 1])) + 1
+        default: 256 << Int64(code - 8)
+        }
+        let isVariableBlocking = b[i + 1] & 1 == 1
+        let sample = isVariableBlocking ? coded : coded * (fixedBlockSize > 0 ? fixedBlockSize : blockSize)
+        return Frame(firstSample: sample, blockSize: blockSize)
     }
 
     /// Header length including the CRC byte, or nil if the fields are invalid.
@@ -457,7 +634,7 @@ enum FLACFrameScanner {
         let first = b[i + 4]
         var utfLength = 1
         if first & 0x80 != 0 {
-            var mask: UInt8 = 0x40
+            var mask: UInt8 = 0x20   // 110xxxxx is two bytes, 1110xxxx three, and so on
             utfLength = 2
             while first & mask != 0 && utfLength < 7 { utfLength += 1; mask >>= 1 }
             guard first & 0x40 != 0 else { return nil }

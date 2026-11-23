@@ -164,16 +164,30 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
     public func seek(to seconds: TimeInterval) {
         queue.async { [self] in
             guard let current = audibleSegment(), !current.item.isLive else { return }
+            let target = max(0, seconds)
             let following = segments.drop { $0.item.id != current.item.id }.dropFirst().first?.item ?? nextItem
             let wasPlaying = isPlaying
-            start(current.item, at: max(0, seconds), emit: nil)
+            // Still decoding this item: move within it, so scrubbing keeps what's downloaded
+            // instead of reconnecting and re-reading the file's headers every time.
+            if let source = decoder, source.item.id == current.item.id {
+                generation += 1
+                node.stop()
+                scheduledFrames = 0
+                buffersInFlight = 0
+                segments = [Segment(item: current.item, startFrame: 0, itemOffset: target)]
+                audibleID = current.item.id
+                endReported = false
+                attach(source)
+                if source.seek(to: target) {
+                    nextItem = following
+                    fill()
+                    startOutput(current.item, at: target, emit: nil, autoplay: wasPlaying)
+                    return
+                }
+            }
+            start(current.item, at: target, emit: nil, autoplay: wasPlaying)
             nextItem = following
             fill()
-            if !wasPlaying {
-                node.pause()
-                pausedPosition = max(0, seconds)
-                setPlaying(false)
-            }
         }
     }
 
@@ -255,11 +269,16 @@ public final class AudioEnginePlayer: PlaybackEngine, AudioTapHost, @unchecked S
         audibleID = item.id
         endReported = false
         fill()
+        startOutput(item, at: offset, emit: event, autoplay: autoplay)
+    }
+
+    private func startOutput(_ item: EngineItem, at offset: TimeInterval, emit event: EngineEvent?, autoplay: Bool) {
         do {
             try startEngineIfNeeded()
             startPolling()
             if autoplay {
                 try node.playAudio()
+                pausedPosition = nil   // otherwise a track started from pause reports a frozen position
                 setPlaying(true)
             } else {
                 pausedPosition = offset

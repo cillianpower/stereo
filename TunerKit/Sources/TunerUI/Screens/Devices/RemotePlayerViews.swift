@@ -108,11 +108,10 @@ struct RemoteNowPlayingView: View {
 
                 if state.isTrack, let duration = state.duration, duration > 0 {
                     TimelineView(.periodic(from: .now, by: 0.5)) { context in
-                        let position = scrubbing ?? min(state.anchor.position(at: context.date), duration)
+                        let live = min(state.anchor.position(at: context.date), duration)
+                        let position = scrubbing ?? live
                         VStack(spacing: 4) {
-                            Slider(value: Binding(get: { position }, set: { scrubbing = $0 }), in: 0...duration) { editing in
-                                if !editing, let s = scrubbing { remote.send(.seek(s)); scrubbing = nil }
-                            }
+                            SeekSlider(position: live, duration: duration, scrubbing: $scrubbing) { remote.send(.seek($0)) }
                             HStack {
                                 Text(Format.duration(position))
                                 Spacer()

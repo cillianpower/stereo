@@ -124,5 +124,11 @@ protocol PCMSource: AnyObject {
     var item: EngineItem { get }
     var onReadable: (() -> Void)? { get set }
     func read(frames: AVAudioFrameCount) throws -> PCMRead
+    /// Moves within the open source, keeping what it has loaded. False means reopen it instead.
+    func seek(to seconds: TimeInterval) -> Bool
     func cancel()
+}
+
+extension PCMSource {
+    func seek(to seconds: TimeInterval) -> Bool { false }
 }

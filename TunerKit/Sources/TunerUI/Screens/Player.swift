@@ -215,9 +215,7 @@ struct NowPlayingView: View {
         let duration = max(app.player.duration ?? 1, 1)
         let position = scrubbing ?? app.player.position
         return VStack(spacing: 4) {
-            Slider(value: Binding(get: { position }, set: { scrubbing = $0 }), in: 0...duration) { editing in
-                if !editing, let s = scrubbing { app.player.seek(to: s); scrubbing = nil }
-            }
+            SeekSlider(position: app.player.position, duration: duration, scrubbing: $scrubbing) { app.player.seek(to: $0) }
             HStack {
                 Text(Format.duration(position))
                 Spacer()
@@ -259,8 +257,11 @@ struct NowPlayingView: View {
                 toggle(.lyrics, symbol: "quote.bubble")
             }
             Spacer()
-            IdentifyButton()
-            Spacer()
+            // Library tracks already say what they are.
+            if case .station = app.player.nowPlaying {
+                IdentifyButton()
+                Spacer()
+            }
             #if os(iOS)
             RoutePickerButton().frame(width: 32, height: 32)
             #endif
@@ -280,6 +281,43 @@ struct NowPlayingView: View {
                 .background(panel == target ? AnyShapeStyle(.white.opacity(0.25)) : AnyShapeStyle(.clear), in: .circle)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// A position slider that shows the drag while editing and always hands control back afterwards.
+/// `Slider` can deliver a value after its editing-ended callback, or without any callback at all,
+/// so `scrubbing` is only ever set during an edit.
+struct SeekSlider: View {
+    let position: Double
+    let duration: Double
+    @Binding var scrubbing: Double?
+    let onSeek: (Double) -> Void
+    @State private var isEditing = false
+    @State private var lastSeek: Double?
+
+    var body: some View {
+        Slider(value: Binding(get: { scrubbing ?? position }, set: valueChanged), in: 0...duration) { editing in
+            isEditing = editing
+            if editing {
+                scrubbing = scrubbing ?? position
+            } else {
+                if let target = scrubbing { commit(target) }
+                scrubbing = nil
+            }
+        }
+    }
+
+    private func valueChanged(_ value: Double) {
+        if isEditing {
+            scrubbing = value
+        } else if abs(value - (lastSeek ?? position)) > 0.5 {
+            commit(value)   // a tap or accessibility adjustment, or a late final value
+        }
+    }
+
+    private func commit(_ value: Double) {
+        lastSeek = value
+        onSeek(value)
     }
 }
 

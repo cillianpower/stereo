@@ -115,13 +115,19 @@ public final class NowPlayingBridge {
             guard let url = await provider(item),
                   let (data, _) = try? await URLSession.shared.data(from: url),
                   let image = PlatformImage(data: data), !Task.isCancelled else { return }
-            let art = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            let art = Self.makeArtwork(image)
             guard let self, self.artworkKey == key else { return }
             self.artwork = art
             var info = self.center.nowPlayingInfo ?? [:]
             info[MPMediaItemPropertyArtwork] = art
             self.center.nowPlayingInfo = info
         }
+    }
+
+    /// Nonisolated on purpose: MediaPlayer calls the handler on its own queue, and a closure
+    /// formed on the main actor would trap there.
+    private nonisolated static func makeArtwork(_ image: PlatformImage) -> MPMediaItemArtwork {
+        MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }
 
     private func registerCommands() {
