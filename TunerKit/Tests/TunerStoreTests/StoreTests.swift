@@ -19,6 +19,29 @@ private func makeDetail(_ a: Album, titles: [String]) -> AlbumDetail {
     })
 }
 
+@Suite struct IntentQueryTests {
+    private func station(_ name: String) -> Station {
+        Station(origin: .custom(UUID()), name: name, streamURL: URL(string: "https://radio.example/\(name)")!)
+    }
+
+    @Test func randomTracksRespectsLimitAndHasNoDuplicates() throws {
+        let store = try LibraryStore.inMemory()
+        try store.upsert(makeDetail(makeAlbum(1), titles: ["A", "B", "C", "D"]))
+        let sample = try store.randomTracks(limit: 3)
+        #expect(sample.count == 3)
+        #expect(Set(sample.map(\.id)).count == 3)
+    }
+
+    @Test func savedStationsListsFavoritesInOrderThenRecents() throws {
+        let store = try LibraryStore.inMemory()
+        let first = station("First"), second = station("Second"), recent = station("Recent")
+        try store.markPlayed(recent)
+        try store.setFavorite(true, station: first)
+        try store.setFavorite(true, station: second)
+        #expect(try store.savedStations().map(\.name) == ["First", "Second", "Recent"])
+    }
+}
+
 @Suite struct LibraryStoreTests {
     @Test func albumRoundTripWithTracks() throws {
         let store = try LibraryStore.inMemory()

@@ -61,6 +61,8 @@ public final class AppModel {
     @ObservationIgnored var cloudSync: AppStateSync?
     @ObservationIgnored var settingsMirror: SettingsMirror?
 
+    @ObservationIgnored private var startTask: Task<Void, Never>?
+
     private static let serverDefaultsKey = "server.v1"
 
     public init() {
@@ -98,8 +100,20 @@ public final class AppModel {
 
     // MARK: Session
 
+    /// Safe to call from several places at once: the root view and App Intents share one launch.
     public func start() async {
+        if let startTask {
+            await startTask.value
+            return
+        }
         guard phase == .launching else { return }
+        let task = Task { await restoreSession() }
+        startTask = task
+        await task.value
+        startTask = nil
+    }
+
+    private func restoreSession() async {
         if let data = UserDefaults.standard.data(forKey: Self.serverDefaultsKey),
            var config = try? JSONDecoder().decode(ServerConfiguration.self, from: data),
            let secret = Keychain.get(config.id.rawValue) {

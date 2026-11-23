@@ -243,6 +243,14 @@ public final class LibraryStore: Sendable {
         }
     }
 
+    /// A random sample of the whole library, for "Shuffle Library".
+    public func randomTracks(limit: Int = 500) throws -> [Track] {
+        try db.read { db in
+            try TrackRecord.fetchAll(db, sql: "SELECT * FROM track ORDER BY RANDOM() LIMIT ?", arguments: [limit])
+                .compactMap(\.model)
+        }
+    }
+
     /// Albums played a lot but not in `days` days — the "Rediscover" shelf.
     public func rediscoverAlbums(notPlayedInDays days: Int = 90, minPlays: Int = 5, limit: Int = 20) throws -> [Album] {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)

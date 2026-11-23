@@ -6,7 +6,13 @@ struct TunerApp: App {
     #if os(iOS)
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
-    @State private var app = AppModel()
+    @State private var app: AppModel
+
+    init() {
+        let model = AppModel()
+        _app = State(initialValue: model)
+        AppIntentsSetup.configure(model)
+    }
 
     var body: some Scene {
         #if os(macOS)

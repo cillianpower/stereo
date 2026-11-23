@@ -47,6 +47,16 @@ extension LibraryStore {
         }
     }
 
+    /// Every station known locally: favorites in their saved order, then the rest, most recent first.
+    public func savedStations() throws -> [Station] {
+        try db.read { db in
+            decode(try StationRecord.fetchAll(db, sql: """
+                SELECT * FROM station
+                ORDER BY isFavorite DESC, CASE WHEN isFavorite THEN sortIndex END, lastPlayedAt DESC
+                """))
+        }
+    }
+
     public func observeFavoriteStations() -> AsyncStream<[Station]> {
         observe { [self] db in
             decode(try StationRecord.filter(Column("isFavorite") == true).order(Column("sortIndex")).fetchAll(db))
