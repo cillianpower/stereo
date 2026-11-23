@@ -22,20 +22,35 @@ struct AppShell: View {
     @Environment(AppModel.self) private var app
     @State private var tab: TabID = .home
     @State private var showNowPlaying = false
+    @State private var paths: [TabID: NavigationPath] = [:]
 
     enum TabID: Hashable { case home, library, radio, search, settings }
 
     var body: some View {
         TabView(selection: $tab) {
-            Tab("Home", systemImage: "house", value: .home) { stack { HomeView() } }
-            Tab("Radio", systemImage: "dot.radiowaves.left.and.right", value: .radio) { stack { RadioView() } }
-            Tab("Library", systemImage: "square.stack.fill", value: .library) { stack { LibraryView() } }
+            Tab("Home", systemImage: "house", value: .home) { stack(.home) { HomeView() } }
+            Tab("Radio", systemImage: "dot.radiowaves.left.and.right", value: .radio) { stack(.radio) { RadioView() } }
+            Tab("Library", systemImage: "square.stack.fill", value: .library) { stack(.library) { LibraryView() } }
             #if os(macOS)
-            Tab("Settings", systemImage: "gear", value: .settings) { stack { SettingsView() } }
+            Tab("Settings", systemImage: "gear", value: .settings) { stack(.settings) { SettingsView() } }
             #endif
-            Tab(value: .search, role: .search) { stack { SearchView() } }
+            Tab(value: .search, role: .search) { stack(.search) { SearchView() } }
         }
         .tabViewStyle(.sidebarAdaptable)
+        .onChange(of: app.pendingDestination, initial: true) { _, destination in
+            guard let destination else { return }
+            showNowPlaying = false
+            switch destination {
+            case .library(let route):
+                var path = NavigationPath()
+                path.append(route)
+                paths[.library] = path
+                tab = .library
+            case .radio:
+                tab = .radio
+            }
+            app.pendingDestination = nil
+        }
         #if os(iOS)
         .tabViewBottomAccessory {
             if app.remote.isControllingRemote { RemoteMiniPlayer(showNowPlaying: $showNowPlaying) }
@@ -63,8 +78,8 @@ struct AppShell: View {
         #endif
     }
 
-    private func stack<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        NavigationStack {
+    private func stack<Content: View>(_ id: TabID, @ViewBuilder _ content: () -> Content) -> some View {
+        NavigationStack(path: Binding(get: { paths[id] ?? NavigationPath() }, set: { paths[id] = $0 })) {
             content()
                 .tunerDestinations()
                 #if os(iOS)
@@ -83,12 +98,21 @@ struct AppShell: View {
 struct SignInView: View {
     @Environment(AppModel.self) private var app
     @State private var name = "Home"
-    @State private var primaryURL = ""
+    @State private var primaryURL = Self.defaultServerURL
     @State private var fallbackURL = ""
     @State private var username = ""
     @State private var password = ""
     @State private var working = false
     @State private var error: String?
+
+    /// Debug builds can prefill this from the gitignored Config/Local.xcconfig.
+    private static var defaultServerURL: String {
+        #if DEBUG
+        Bundle.main.object(forInfoDictionaryKey: "TunerDevServerURL") as? String ?? ""
+        #else
+        ""
+        #endif
+    }
 
     var body: some View {
         NavigationStack {

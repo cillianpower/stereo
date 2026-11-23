@@ -102,7 +102,7 @@ struct TogglePlaybackIntent: AudioPlaybackIntent {
 
 struct IdentifySongIntent: AppIntent {
     static let title: LocalizedStringResource = "Identify Song"
-    static let description = IntentDescription("Identifies the song that's currently playing, and returns its title and artist.")
+    static let description = IntentDescription("Identifies the song on the current radio station, and returns its title and artist.")
 
     @Dependency var app: AppModel
 

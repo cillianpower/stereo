@@ -23,6 +23,10 @@ public final class AppModel {
     public private(set) var syncProgress: LibrarySyncer.Progress?
     public private(set) var syncError: String?
     public private(set) var isOnExpensiveNetwork = false
+    /// Goes up after each successful library sync, so system indexes know when to refresh.
+    public private(set) var librarySyncCount = 0
+    /// A screen requested from outside the UI (Spotlight, Siri). `AppShell` opens it and clears this.
+    public var pendingDestination: AppDestination?
 
     /// Artwork and album for the station's current song, plus the matching track in your library.
     public private(set) var radioEnrichment: EnrichedTitle?
@@ -78,7 +82,7 @@ public final class AppModel {
         trackCache = TrackCache(directory: caches.appending(path: "Audio"),
                                 limitBytes: Int64(settings.cacheLimitGB) * 1_073_741_824)
         do {
-            store = try LibraryStore(path: support.appending(path: "library.sqlite").path())
+            store = try LibraryStore(path: support.appending(path: "library.sqlite").path(percentEncoded: false))
         } catch {
             // A corrupt cache must never brick the app: it's rebuilt from the server.
             Logger(subsystem: "app.tuner", category: "app").error("store open failed, using memory: \(error)")
@@ -200,6 +204,7 @@ public final class AppModel {
                 Task { @MainActor in self?.syncProgress = progress }
             }
             await downloads?.refreshPins()   // new tracks on pinned albums/playlists
+            librarySyncCount += 1
         } catch {
             syncError = error.localizedDescription
             log.error("sync failed: \(error.localizedDescription)")

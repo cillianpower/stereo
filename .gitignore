@@ -8,3 +8,4 @@ TunerKit/.build/
 TunerKit/.swiftpm/
 /build/
 .claude/worktrees/
+Config/Local.xcconfig

@@ -12,6 +12,7 @@ public enum AppActionError: LocalizedError, Equatable {
     case nothingPlaying
     case identifyBusy
     case identifyNeedsLocalPlayback
+    case identifyNeedsRadio
 
     public var errorDescription: String? {
         switch self {
@@ -21,8 +22,15 @@ public enum AppActionError: LocalizedError, Equatable {
         case .nothingPlaying: "Nothing is playing."
         case .identifyBusy: "Already identifying a song."
         case .identifyNeedsLocalPlayback: "Song identification only works on the device that's playing."
+        case .identifyNeedsRadio: "Song identification is for radio stations."
         }
     }
+}
+
+/// Where an external request (such as a Spotlight result) should land.
+public enum AppDestination: Hashable {
+    case library(Route)
+    case radio
 }
 
 /// Actions for App Intents. Each one finishes launching first, because the system can start the
@@ -108,6 +116,7 @@ extension AppModel {
         await start()
         guard !remote.isControllingRemote else { throw AppActionError.identifyNeedsLocalPlayback }
         guard player.isPlaying else { throw AppActionError.nothingPlaying }
+        guard case .station = player.nowPlaying else { throw AppActionError.identifyNeedsRadio }
         guard identification != .listening else { throw AppActionError.identifyBusy }
         await identifyCurrentSong()
         switch identification {

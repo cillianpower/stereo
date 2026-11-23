@@ -38,10 +38,16 @@ struct TunerShortcuts: AppShortcutsProvider {
     }
 }
 
+@MainActor
 enum AppIntentsSetup {
-    /// Registers the shared model before any intent runs, and keeps Siri's playlist and station names current.
-    @MainActor static func configure(_ app: AppModel) {
+    private static var spotlight: SpotlightIndexer?
+
+    /// Registers the shared model before any intent runs, and keeps Siri and Spotlight current.
+    static func configure(_ app: AppModel) {
         AppDependencyManager.shared.add(dependency: app)
+        let indexer = SpotlightIndexer(app: app)
+        indexer.start()
+        spotlight = indexer
         TunerShortcuts.updateAppShortcutParameters()
         Task {
             for await _ in app.store.observePlaylists() { TunerShortcuts.updateAppShortcutParameters() }

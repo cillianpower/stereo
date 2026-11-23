@@ -6,6 +6,8 @@ options:
     macOS: "27.0"
   createIntermediateGroups: true
   groupSortPosition: top
+configFiles:
+  Debug: Config/Debug.xcconfig
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -52,6 +54,7 @@ targets:
       properties:
         CFBundleDisplayName: Tuner
         TunerCloudKitContainer: iCloud.$(TUNER_BUNDLE_PREFIX)
+        TunerDevServerURL: $(TUNER_DEV_SERVER_URL)
         UILaunchScreen: {}
         UIBackgroundModes: [audio, remote-notification]
         UIApplicationSupportsIndirectInputEvents: true
@@ -98,6 +101,7 @@ targets:
       properties:
         CFBundleDisplayName: Tuner
         TunerCloudKitContainer: iCloud.$(TUNER_BUNDLE_PREFIX)
+        TunerDevServerURL: $(TUNER_DEV_SERVER_URL)
         LSApplicationCategoryType: public.app-category.music
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
