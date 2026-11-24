@@ -2,6 +2,8 @@
 
 <p align="center">A Navidrome and internet radio player for iPhone, iPad and Mac.</p>
 
+![Stereo on the Mac, with Home showing Recently Played and Heavy Rotation, and a song playing in the glass capsule in the top bar](docs/images/home.png)
+
 Stereo plays your own music library from a [Navidrome](https://www.navidrome.org) server, or any other OpenSubsonic server, alongside internet radio from [Radio Browser](https://www.radio-browser.info). I wanted something that feels like Apple Music rather than Spotify, so it's native SwiftUI throughout, with Liquid Glass and Apple Music's layout. I did borrow a few of Spotify's ideas: moving playback between devices, gestures, and music that keeps going when the queue runs out.
 
 It's a personal project first, so it's Apple-only and built for the newest systems.
