@@ -456,7 +456,9 @@ private enum MacBarMetrics {
     /// The glass now-playing capsule inside the bar, and its artwork.
     static let capsule: CGFloat = 26
     static let capsuleRadius: CGFloat = 8
-    static let capsuleArt: CGFloat = 22
+    /// Inset 3 pt on every side, with corners concentric to the capsule's (8 - 3).
+    static let capsuleArt: CGFloat = 20
+    static let capsuleArtRadius: CGFloat = 5
     static let button: CGFloat = 28
     /// Square, for a pointer rather than a finger.
     static let railItem: CGFloat = 28
@@ -521,9 +523,17 @@ private struct MacBarArtwork: View {
     var body: some View {
         let hasItem = app.player.nowPlaying != nil
         Button { app.shell.toggleNowPlaying() } label: {
-            NowPlayingArtwork(cornerRadius: 5)
+            Group {
+                if hasItem {
+                    NowPlayingArtwork(cornerRadius: MacBarMetrics.capsuleArtRadius)
+                } else {
+                    // Nothing to show: a quiet glyph on the glass rather than an empty grey tile.
+                    Image(systemName: "music.note")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+            }
                 .frame(width: MacBarMetrics.capsuleArt, height: MacBarMetrics.capsuleArt)
-                .clipShape(.rect(cornerRadius: 5, style: .continuous))
                 .overlay {
                     if isHovering, hasItem {
                         ZStack {
@@ -535,7 +545,7 @@ private struct MacBarArtwork: View {
                         .transition(.opacity)
                     }
                 }
-                .clipShape(.rect(cornerRadius: 5, style: .continuous))
+                .clipShape(.rect(cornerRadius: MacBarMetrics.capsuleArtRadius, style: .continuous))
                 .contentShape(.rect)
         }
         .buttonStyle(MacPressStyle())
@@ -685,10 +695,14 @@ private struct MacPlayerBar: View {
     private var song: some View {
         HStack(spacing: 8) {
             MacBarArtwork()
-                .padding(.leading, 2)
+                .padding(.leading, 3)
 
             HStack(spacing: 5) {
-                Text(MacPlayerText.title(app)).font(.system(size: 12, weight: .semibold)).layoutPriority(1)
+                let idle = app.player.nowPlaying == nil
+                Text(MacPlayerText.title(app))
+                    .font(.system(size: 12, weight: idle ? .regular : .semibold))
+                    .foregroundStyle(idle ? .secondary : .primary)
+                    .layoutPriority(1)
                 if density < .tight, let subtitle = MacPlayerText.barSubtitle(app), !subtitle.isEmpty {
                     Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
