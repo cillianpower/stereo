@@ -4,7 +4,8 @@ xcuserdata/
 DerivedData/
 .build/
 .swiftpm/
-TunerKit/.build/
-TunerKit/.swiftpm/
+StereoKit/.build/
+StereoKit/.swiftpm/
 /build/
 .claude/worktrees/
+Config/Local.xcconfig

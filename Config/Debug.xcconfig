@@ -1,0 +1,3 @@
+// Machine-specific Debug settings live in the gitignored Local.xcconfig. For example:
+//   STEREO_DEV_SERVER_URL = http:/$()/my-server:4533
+#include? "Local.xcconfig"
