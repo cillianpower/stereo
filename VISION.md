@@ -1,4 +1,4 @@
-# Tuner — Vision
+# Stereo — Vision
 
 A native SwiftUI music client for iOS, iPadOS and macOS. It plays your self-hosted Navidrome/Subsonic library and internet radio, with an Apple Music–style UI and Spotify Connect–style device handoff.
 
@@ -50,7 +50,7 @@ Music only, no podcasts. Library and Radio are **separate sections**, like Apple
 
 ## Device handoff & remote control
 - **v1 (LAN-only), two things:**
-  1. **Remote control:** a phone controls a Tuner instance on the Mac (discovery over Bonjour).
+  1. **Remote control:** a phone controls a Stereo instance on the Mac (discovery over Bonjour).
   2. **Seamless move:** take the queue and position from one device and resume on another. Candidate building blocks: Subsonic `savePlayQueue`/`getPlayQueue` and a direct LAN transfer.
 - **Still to figure out:** external targets (AirPlay is mostly free through the system; Chromecast, Sonos, UPnP), working away from home (would need a relay), and Navidrome jukebox mode.
 

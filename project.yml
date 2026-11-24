@@ -1,5 +1,5 @@
-# Generates Tuner.xcodeproj: `xcodegen generate`. The .xcodeproj is a build artifact and is gitignored.
-name: Tuner
+# Generates Stereo.xcodeproj: `xcodegen generate`. The .xcodeproj is a build artifact and is gitignored.
+name: Stereo
 options:
   deploymentTarget:
     iOS: "27.0"
@@ -16,45 +16,45 @@ settings:
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: 224XVWZLBK
     # Change this one value to move every bundle ID (app, widgets, app group) to a namespace you own.
-    TUNER_BUNDLE_PREFIX: com.cillianpower.tuner
+    STEREO_BUNDLE_PREFIX: com.cillianpower.stereo
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 packages:
-  TunerKit:
-    path: TunerKit
+  StereoKit:
+    path: StereoKit
 targets:
-  Tuner-iOS:
+  Stereo-iOS:
     type: application
     platform: iOS
     sources:
       - Apps/Shared
       - Apps/iOS
     dependencies:
-      - package: TunerKit
-        product: TunerUI
+      - package: StereoKit
+        product: StereoUI
     settings:
       base:
-        PRODUCT_NAME: Tuner
-        PRODUCT_BUNDLE_IDENTIFIER: $(TUNER_BUNDLE_PREFIX)
+        PRODUCT_NAME: Stereo
+        PRODUCT_BUNDLE_IDENTIFIER: $(STEREO_BUNDLE_PREFIX)
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
     # Declared as properties: XcodeGen rewrites the file from these on every `generate`.
     entitlements:
-      path: Apps/iOS/Tuner.entitlements
+      path: Apps/iOS/Stereo.entitlements
       properties:
         com.apple.developer.icloud-services: [CloudKit]
-        com.apple.developer.icloud-container-identifiers: [iCloud.$(TUNER_BUNDLE_PREFIX)]
-        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(TUNER_BUNDLE_PREFIX)
-        keychain-access-groups: [$(AppIdentifierPrefix)$(TUNER_BUNDLE_PREFIX)]
+        com.apple.developer.icloud-container-identifiers: [iCloud.$(STEREO_BUNDLE_PREFIX)]
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(STEREO_BUNDLE_PREFIX)
+        keychain-access-groups: [$(AppIdentifierPrefix)$(STEREO_BUNDLE_PREFIX)]
         # CKSyncEngine is woken by silent pushes when another device changes something.
         aps-environment: development
     info:
       path: Apps/iOS/Info.plist
       properties:
-        CFBundleDisplayName: Tuner
-        TunerCloudKitContainer: iCloud.$(TUNER_BUNDLE_PREFIX)
-        TunerDevServerURL: $(TUNER_DEV_SERVER_URL)
+        CFBundleDisplayName: Stereo
+        StereoCloudKitContainer: iCloud.$(STEREO_BUNDLE_PREFIX)
+        StereoDevServerURL: $(STEREO_DEV_SERVER_URL)
         UILaunchScreen: {}
         UIBackgroundModes: [audio, remote-notification]
         UIApplicationSupportsIndirectInputEvents: true
@@ -64,53 +64,53 @@ targets:
         # Personal servers and many radio streams are plain HTTP on the LAN.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: Tuner connects to your music server and to Tuner on your other devices over your local network.
-        NSBonjourServices: [_tuner._tcp]
-  Tuner-macOS:
+        NSLocalNetworkUsageDescription: Stereo connects to your music server and to Stereo on your other devices over your local network.
+        NSBonjourServices: [_stereo._tcp]
+  Stereo-macOS:
     type: application
     platform: macOS
     sources:
       - Apps/Shared
       - Apps/macOS
     dependencies:
-      - package: TunerKit
-        product: TunerUI
+      - package: StereoKit
+        product: StereoUI
     # Restricted iCloud entitlements need a provisioning profile (Xcode automatic signing). For an
     # ad-hoc CLI build, pass an ABSOLUTE path (a relative one is resolved per package target):
-    #   CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS="$PWD/Apps/macOS/Tuner-Local.entitlements"
+    #   CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS="$PWD/Apps/macOS/Stereo-Local.entitlements"
     # (sandbox + network only); sync then reports "unavailable" instead of the build failing.
     entitlements:
-      path: Apps/macOS/Tuner.entitlements
+      path: Apps/macOS/Stereo.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.network.server: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.developer.icloud-services: [CloudKit]
-        com.apple.developer.icloud-container-identifiers: [iCloud.$(TUNER_BUNDLE_PREFIX)]
-        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(TUNER_BUNDLE_PREFIX)
-        keychain-access-groups: [$(AppIdentifierPrefix)$(TUNER_BUNDLE_PREFIX)]
+        com.apple.developer.icloud-container-identifiers: [iCloud.$(STEREO_BUNDLE_PREFIX)]
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(STEREO_BUNDLE_PREFIX)
+        keychain-access-groups: [$(AppIdentifierPrefix)$(STEREO_BUNDLE_PREFIX)]
         com.apple.developer.aps-environment: development
     settings:
       base:
-        PRODUCT_NAME: Tuner
-        PRODUCT_BUNDLE_IDENTIFIER: $(TUNER_BUNDLE_PREFIX)
+        PRODUCT_NAME: Stereo
+        PRODUCT_BUNDLE_IDENTIFIER: $(STEREO_BUNDLE_PREFIX)
         ENABLE_HARDENED_RUNTIME: YES
     info:
       path: Apps/macOS/Info.plist
       properties:
-        CFBundleDisplayName: Tuner
-        TunerCloudKitContainer: iCloud.$(TUNER_BUNDLE_PREFIX)
-        TunerDevServerURL: $(TUNER_DEV_SERVER_URL)
+        CFBundleDisplayName: Stereo
+        StereoCloudKitContainer: iCloud.$(STEREO_BUNDLE_PREFIX)
+        StereoDevServerURL: $(STEREO_DEV_SERVER_URL)
         LSApplicationCategoryType: public.app-category.music
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: Tuner connects to your music server and to Tuner on your other devices over your local network.
-        NSBonjourServices: [_tuner._tcp]
+        NSLocalNetworkUsageDescription: Stereo connects to your music server and to Stereo on your other devices over your local network.
+        NSBonjourServices: [_stereo._tcp]
 schemes:
-  Tuner-iOS:
+  Stereo-iOS:
     build:
-      targets: { Tuner-iOS: all }
-  Tuner-macOS:
+      targets: { Stereo-iOS: all }
+  Stereo-macOS:
     build:
-      targets: { Tuner-macOS: all }
+      targets: { Stereo-macOS: all }

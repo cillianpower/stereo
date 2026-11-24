@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Tuner</string>
+	<string>Stereo</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -27,14 +27,14 @@
 	</dict>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_tuner._tcp</string>
+		<string>_stereo._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Tuner connects to your music server and to Tuner on your other devices over your local network.</string>
-	<key>TunerCloudKitContainer</key>
-	<string>iCloud.$(TUNER_BUNDLE_PREFIX)</string>
-	<key>TunerDevServerURL</key>
-	<string>$(TUNER_DEV_SERVER_URL)</string>
+	<string>Stereo connects to your music server and to Stereo on your other devices over your local network.</string>
+	<key>StereoCloudKitContainer</key>
+	<string>iCloud.$(STEREO_BUNDLE_PREFIX)</string>
+	<key>StereoDevServerURL</key>
+	<string>$(STEREO_DEV_SERVER_URL)</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

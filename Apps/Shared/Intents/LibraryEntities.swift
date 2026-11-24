@@ -1,6 +1,6 @@
 import AppIntents
-import TunerModel
-import TunerUI
+import StereoModel
+import StereoUI
 
 private let suggestionLimit = 50
 

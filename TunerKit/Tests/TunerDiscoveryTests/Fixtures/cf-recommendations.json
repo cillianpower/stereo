@@ -1,4 +1,0 @@
-{"payload": {"count": 3, "entity": "recording", "last_updated": 1763500000, "total_mbid_count": 3, "user_name": "tuneruser",
- "mbids": [{"recording_mbid": "aaaaaaaa-0000-4000-8000-000000000001", "score": 0.93},
-           {"recording_mbid": "eeeeeeee-0000-4000-8000-000000000005", "score": 0.81},
-           {"recording_mbid": "ffffffff-0000-4000-8000-000000000006", "score": 0.5}]}}

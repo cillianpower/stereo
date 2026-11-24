@@ -1,4 +1,4 @@
-Tuner is a SwiftUI Navidrome/Subsonic client for iOS, iPadOS, and macOS.
+Stereo is a SwiftUI Navidrome/Subsonic client for iOS, iPadOS, and macOS.
 
 it connects to a subsonic or navidrome server, radio-browser, and hopefully more, with a native, apple music-like UI.
 

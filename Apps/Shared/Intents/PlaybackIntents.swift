@@ -1,6 +1,6 @@
 import AppIntents
-import TunerModel
-import TunerUI
+import StereoModel
+import StereoUI
 
 struct PlayAlbumIntent: AudioPlaybackIntent {
     static let title: LocalizedStringResource = "Play Album"

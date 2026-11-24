@@ -3,17 +3,17 @@ import CoreSpotlight
 import Foundation
 import Observation
 import os
-import TunerModel
-import TunerStore
-import TunerUI
+import StereoModel
+import StereoStore
+import StereoUI
 
 /// Keeps Spotlight in step with the local library: updates only what changed after a sync, and
 /// removes everything on sign-out so a disconnected library doesn't stay in system search.
 @MainActor
 final class SpotlightIndexer {
     private let app: AppModel
-    private let log = Logger(subsystem: "app.tuner", category: "spotlight")
-    private let manifestURL = URL.cachesDirectory.appending(path: "Tuner/spotlight-manifest.json")
+    private let log = Logger(subsystem: "app.stereo", category: "spotlight")
+    private let manifestURL = URL.cachesDirectory.appending(path: "Stereo/spotlight-manifest.json")
     private var manifest: [String: [String: String]] = [:]
     private var work: Task<Void, Never>?
     private static let batchSize = 500

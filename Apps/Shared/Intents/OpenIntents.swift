@@ -1,7 +1,7 @@
 import AppIntents
 import CoreSpotlight
-import TunerModel
-import TunerUI
+import StereoModel
+import StereoUI
 
 // MARK: Spotlight fields
 
