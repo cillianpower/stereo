@@ -2,7 +2,7 @@
 
 A native SwiftUI music client for iOS, iPadOS and macOS. It plays your self-hosted Navidrome/Subsonic library and internet radio, with an Apple Music–style UI and Spotify Connect–style device handoff.
 
-**Audience:** me first, open source second. **Repo:** private until v1, license decided then.
+**Audience:** me first, open source second. **Repo:** public on GitHub, MIT licensed.
 **Design rule:** it should feel like Apple Music, not Spotify. Take Spotify's *features* (gestures, handoff, smart shuffle) and leave its *design*.
 
 ## Platforms
@@ -15,7 +15,7 @@ A native SwiftUI music client for iOS, iPadOS and macOS. It plays your self-host
 Music only, no podcasts. Library and Radio are **separate sections**, like Apple Music's Radio tab.
 1. **Navidrome / OpenSubsonic.** One server with multiple URLs (LAN / remote), switching automatically to whichever responds.
 2. **Radio Browser** (`all.api.radio-browser.info`, with the server picked by DNS lookup).
-3. **Later, needs thought:** Jellyfin, local files. Put sources behind a `MusicSource` protocol so these can be added without a rewrite.
+3. **Later, needs thought:** local files. (Jellyfin will be a separate video app, not a source here.) Put sources behind a `MusicSource` protocol so these can be added without a rewrite.
 
 ## v1 scope: Player + Radio
 
@@ -76,5 +76,4 @@ Music only, no podcasts. Library and Radio are **separate sections**, like Apple
 ## Open questions
 - Audio engine: AVQueuePlayer (gapless is doable) or AVAudioEngine (needed later for crossfade, EQ and Auto-DJ). Decide early so crossfade can be added without rewriting playback.
 - Handoff protocol design: transport, discovery, and conflicts when two devices are playing.
-- Whether Jellyfin music support is worth doing.
 - A Mac UI that goes beyond the iOS app after v1.
