@@ -157,7 +157,11 @@ private struct ListenBrainzPromo: View {
                 Image(systemName: "chevron.right").foregroundStyle(.tertiary)
             }
             .padding(Metrics.promoPadding)
+            #if os(macOS)
+            .glassPanel(cornerRadius: Metrics.promoRadius)
+            #else
             .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: Metrics.promoRadius))
+            #endif
         }
         .buttonStyle(.plain)
         .padding(.horizontal, Metrics.pagePadding)

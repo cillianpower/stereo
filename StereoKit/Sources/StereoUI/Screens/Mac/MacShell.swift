@@ -180,13 +180,22 @@ struct MacShell: View {
             // Hiding the toolbar outright would take the traffic lights with it.
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
 
-            // One shape for the bar and mini sidebar, so the corner where they meet has no seam.
+            // No bar behind the player: it sits on the window's glass, and pages scrolling up beneath
+            // it fade out instead of meeting a hard edge. The mini sidebar is the same glass, set off
+            // by a faint seam.
             Color.clear
                 .overlay(alignment: .topLeading) {
-                    MacChromeShape(topHeight: Metrics.macTopBar, railWidth: shell.railWidth)
-                        .fill(.ultraThinMaterial)
-                        .frame(width: shell.detailWidth + shell.railWidth)
-                        .offset(x: shell.detailMinX - shell.railWidth)
+                    Color.clear
+                        .frame(width: shell.detailWidth, height: Metrics.macTopBar)
+                        .glassEdgeFade(.top, extends: 18)
+                        .offset(x: shell.detailMinX)
+                }
+                .overlay(alignment: .topLeading) {
+                    if shell.railWidth > 0 {
+                        GlassSeam()
+                            .padding(.top, Metrics.macTopBar)
+                            .offset(x: shell.detailMinX - 1)
+                    }
                 }
                 .allowsHitTesting(false)
                 .ignoresSafeArea(.container, edges: .top)
@@ -226,6 +235,7 @@ struct MacShell: View {
             }
         }
         .tint(app.settings.accent.color)
+        .windowGlass()
         .onChange(of: shell.isNowPlayingExpanded) { _, expanded in animateNowPlaying(expanded) }
         .frame(minWidth: 900, minHeight: 520)
         .onChange(of: app.pendingDestination, initial: true) { _, destination in
@@ -443,29 +453,15 @@ private enum MacBarDensity: Int, Comparable {
 /// Square-celled controls shared by the top bar.
 private enum MacBarMetrics {
     static let height = Metrics.macTopBar
+    /// The glass now-playing capsule inside the bar, and its artwork.
+    static let capsule: CGFloat = 26
+    static let capsuleRadius: CGFloat = 8
+    static let capsuleArt: CGFloat = 22
     static let button: CGFloat = 28
     /// Square, for a pointer rather than a finger.
     static let railItem: CGFloat = 28
     /// Clears the window's traffic lights when the sidebar is hidden.
     static let trafficLights: CGFloat = 78
-}
-
-/// The blurred top strip plus, when the sidebar is collapsed, a column down the left edge.
-private struct MacChromeShape: Shape {
-    var topHeight: CGFloat
-    var railWidth: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: .zero)
-        path.addLine(to: CGPoint(x: rect.maxX, y: 0))
-        path.addLine(to: CGPoint(x: rect.maxX, y: topHeight))
-        path.addLine(to: CGPoint(x: railWidth, y: topHeight))
-        path.addLine(to: CGPoint(x: railWidth, y: rect.maxY))
-        path.addLine(to: CGPoint(x: 0, y: rect.maxY))
-        path.closeSubpath()
-        return path
-    }
 }
 
 /// Opens from the top bar's artwork out to the whole window.
@@ -525,9 +521,9 @@ private struct MacBarArtwork: View {
     var body: some View {
         let hasItem = app.player.nowPlaying != nil
         Button { app.shell.toggleNowPlaying() } label: {
-            NowPlayingArtwork(cornerRadius: 0)
-                .frame(width: MacBarMetrics.height, height: MacBarMetrics.height)
-                .clipped()
+            NowPlayingArtwork(cornerRadius: 5)
+                .frame(width: MacBarMetrics.capsuleArt, height: MacBarMetrics.capsuleArt)
+                .clipShape(.rect(cornerRadius: 5, style: .continuous))
                 .overlay {
                     if isHovering, hasItem {
                         ZStack {
@@ -539,6 +535,7 @@ private struct MacBarArtwork: View {
                         .transition(.opacity)
                     }
                 }
+                .clipShape(.rect(cornerRadius: 5, style: .continuous))
                 .contentShape(.rect)
         }
         .buttonStyle(MacPressStyle())
@@ -640,12 +637,29 @@ private struct MacPlayerBar: View {
         HStack(spacing: 0) {
             Color.clear.frame(width: leadingInset)
             MacBackButton()
-            MacBarDivider()
             if app.remote.isControllingRemote {
                 remote
             } else {
                 MacTransportControls(size: .bar, isCompact: density == .tight)
-                MacBarDivider()
+                    .padding(.horizontal, 4)
+                nowPlayingCapsule
+                    .padding(.trailing, 6)
+                MacPlayerAccessories(density: density)
+            }
+        }
+        .frame(height: MacBarMetrics.height)
+        .frame(maxWidth: .infinity)
+        // Empty parts of the bar still move the window, as a title bar should.
+        .background { Color.clear.contentShape(.rect).gesture(WindowDragGesture()) }
+        .sheet(isPresented: $showRemote) {
+            RemoteNowPlayingView().frame(minWidth: 480, minHeight: 720)
+        }
+    }
+
+    /// The song and its progress in one Liquid Glass capsule, like Audiogen's player: the one
+    /// solid-looking surface in a bar that otherwise sits straight on the window's glass.
+    private var nowPlayingCapsule: some View {
+        HStack(spacing: 0) {
                 song
                 MacBarDivider().overlay {
                     MacColumnHandle { delta in
@@ -663,22 +677,15 @@ private struct MacPlayerBar: View {
                     .accessibilityLabel("Resize Song Column")
                 }
                 progress
-                MacBarDivider()
-                MacPlayerAccessories(density: density)
-            }
         }
-        .frame(height: MacBarMetrics.height)
-        .frame(maxWidth: .infinity)
-        // Empty parts of the bar still move the window, as a title bar should.
-        .background { Color.clear.contentShape(.rect).gesture(WindowDragGesture()) }
-        .sheet(isPresented: $showRemote) {
-            RemoteNowPlayingView().frame(minWidth: 480, minHeight: 720)
-        }
+        .frame(height: MacBarMetrics.capsule)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MacBarMetrics.capsuleRadius, style: .continuous))
     }
 
     private var song: some View {
         HStack(spacing: 8) {
             MacBarArtwork()
+                .padding(.leading, 2)
 
             HStack(spacing: 5) {
                 Text(MacPlayerText.title(app)).font(.system(size: 12, weight: .semibold)).layoutPriority(1)
@@ -1431,6 +1438,8 @@ private struct MacSidePanel: View {
             .transition(.opacity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .scrollContentBackground(.hidden)
+        .overlay(alignment: .leading) { GlassSeam() }
         .task(id: trackID) {
             lyrics = nil
             guard case .track(let track) = app.player.nowPlaying else { return }
@@ -1454,6 +1463,7 @@ public struct MacDetailWindow: View {
         }
         .frame(minWidth: 620, minHeight: 480)
         .tint(app.settings.accent.color)
+        .windowGlass()
     }
 }
 
@@ -1471,7 +1481,9 @@ public struct MacSettingsView: View {
             }
         }
         .frame(width: 560, height: 640)
+        .scrollContentBackground(.hidden)
         .tint(app.settings.accent.color)
+        .windowGlass()
     }
 }
 
