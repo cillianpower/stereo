@@ -111,6 +111,25 @@ extension AppModel {
         player.togglePlayPause()
     }
 
+    /// Next or previous track, for the Now Playing widget.
+    public func performSkip(forward: Bool) async throws {
+        await start()
+        if remote.isControllingRemote {
+            remote.send(forward ? .next : .previous)
+            return
+        }
+        guard case .track = player.nowPlaying else { throw AppActionError.nothingPlaying }
+        forward ? player.next() : player.previous()
+    }
+
+    /// Plays a saved station by its ID, for the Stations widget.
+    public func performPlayStation(id: String) async throws {
+        guard let station = try store.savedStations().first(where: { $0.id == id }) else {
+            throw AppActionError.notFound("station")
+        }
+        await performPlayStation(station)
+    }
+
     /// Returns "Title by Artist", or nil when there was no match.
     public func performIdentifySong() async throws -> String? {
         await start()

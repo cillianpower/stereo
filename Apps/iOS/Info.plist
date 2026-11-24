@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -31,6 +31,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Stereo connects to your music server and to Stereo on your other devices over your local network.</string>
+	<key>StereoAppGroup</key>
+	<string>$(STEREO_APP_GROUP)</string>
 	<key>StereoCloudKitContainer</key>
 	<string>iCloud.$(STEREO_BUNDLE_PREFIX)</string>
 	<key>StereoDevServerURL</key>

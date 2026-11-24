@@ -11,6 +11,7 @@ import StereoRadio
 import StereoStore
 import StereoSync
 import StereoSystem
+import StereoWidgetData
 
 /// Composition root: builds every service once and exposes app-level actions to the views.
 @MainActor
@@ -57,6 +58,8 @@ public final class AppModel {
     @ObservationIgnored private let prober = StreamProber()
     @ObservationIgnored private let trackCache: TrackCache
     @ObservationIgnored private var bridge: NowPlayingBridge?
+    /// Nil when the build has no App Group (ad-hoc Mac builds, tests).
+    @ObservationIgnored private var widgets: WidgetPublisher?
     @ObservationIgnored private let pathMonitor = NWPathMonitor()
     @ObservationIgnored private let expensive = OSAllocatedUnfairLock(initialState: false)
     @ObservationIgnored private let log = Logger(subsystem: "app.stereo", category: "app")
@@ -106,6 +109,10 @@ public final class AppModel {
         startNetworkMonitor()
         observeRadioTitles()
         startAppStateSync()
+        if let snapshots = WidgetSnapshotStore.appGroup() {
+            widgets = WidgetPublisher(app: self, store: snapshots)
+            widgets?.start()
+        }
     }
 
     // MARK: Session
