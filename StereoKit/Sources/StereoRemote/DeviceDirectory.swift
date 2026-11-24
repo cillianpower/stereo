@@ -29,6 +29,18 @@ public final class DeviceDirectory {
 
     public func start() {
         guard browser == nil else { return }
+        startBrowser()
+    }
+
+    /// Starts browsing again without clearing the list, which refills within a second. Call when
+    /// the app returns to the foreground or the Mac wakes: a suspended browser can stop updating.
+    public func restart() {
+        browser?.cancel()
+        browser = nil
+        startBrowser()
+    }
+
+    private func startBrowser() {
         let params = NWParameters()
         params.includePeerToPeer = true
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: remoteServiceType, domain: nil), using: params)
@@ -36,9 +48,19 @@ public final class DeviceDirectory {
             let found = results.compactMap(Self.device(from:))
             Task { @MainActor in self?.update(found) }
         }
-        browser.stateUpdateHandler = { [weak self] state in
-            if case .failed(let e) = state { Task { @MainActor in self?.error = e.localizedDescription } }
-            if case .waiting(let e) = state { Task { @MainActor in self?.error = e.localizedDescription } }
+        browser.stateUpdateHandler = { [weak self, weak browser] state in
+            switch state {
+            case .ready:
+                Task { @MainActor in self?.error = nil }
+            case .waiting(let e):
+                // Usually local network access denied; it recovers on its own once allowed.
+                Task { @MainActor in self?.error = e.localizedDescription }
+            case .failed(let e):
+                let identity = browser.map(ObjectIdentifier.init)
+                Task { @MainActor in self?.browserFailed(identity, error: e.localizedDescription) }
+            default:
+                break
+            }
         }
         browser.start(queue: queue)
         self.browser = browser
@@ -48,6 +70,16 @@ public final class DeviceDirectory {
         browser?.cancel()
         browser = nil
         devices = []
+    }
+
+    private func browserFailed(_ identity: ObjectIdentifier?, error: String) {
+        guard let browser, identity == ObjectIdentifier(browser) else { return }
+        self.error = error
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, self.browser.map(ObjectIdentifier.init) == identity else { return }
+            self.restart()
+        }
     }
 
     private func update(_ found: [DiscoveredDevice]) {

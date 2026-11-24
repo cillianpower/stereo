@@ -3,7 +3,8 @@ import StereoModel
 
 /// Wire protocol version. Bump on any incompatible change to `RemoteMessage`; peers on a
 /// different version refuse the session with `.versionMismatch` instead of misreading messages.
-public let remoteProtocolVersion = 1
+/// v2: adds `ping`. Each side sends one at least every few seconds and drops a peer that goes quiet.
+public let remoteProtocolVersion = 2
 
 /// Bonjour service type every Stereo instance advertises.
 public let remoteServiceType = "_stereo._tcp"
@@ -239,6 +240,8 @@ public enum RemoteMessage: Codable, Hashable, Sendable {
     case transferCommit(id: UUID)
     case transferCancel(id: UUID)
     case error(RemoteErrorCode, message: String)
+    /// Keepalive. Any frame proves the peer is alive; this one is sent when there's nothing else to say.
+    case ping
 }
 
 /// One frame on the wire: the protocol version travels with every message.

@@ -44,7 +44,7 @@ struct RemoteMiniPlayer: View {
         TimelineView(.periodic(from: .now, by: 0.5)) { context in
             MiniPlayerPill(
                 title: state.title,
-                subtitle: remote.controller?.device?.name,
+                subtitle: remote.controlledDeviceLabel,
                 position: state.isTrack ? state.anchor.position(at: context.date) : nil,
                 duration: state.isTrack ? state.duration : nil,
                 isPlaying: state.isPlaying,
@@ -79,7 +79,7 @@ struct RemoteNowPlayingView: View {
 
             VStack(spacing: 20) {
                 GrabBar { dismiss() }
-                Label("Playing on \(remote.controller?.device?.name ?? "")", systemImage: remote.controller?.device?.kind.symbolName ?? "hifispeaker")
+                Label(remote.reconnectingTo == nil ? "Playing on \(remote.controlledDeviceLabel)" : remote.controlledDeviceLabel, systemImage: remote.controller?.device?.kind.symbolName ?? "hifispeaker")
                     .font(.footnote.weight(.semibold))
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .background(.white.opacity(0.15), in: .capsule)

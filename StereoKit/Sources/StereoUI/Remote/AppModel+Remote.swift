@@ -6,6 +6,8 @@ import StereoPlayback
 import StereoRemote
 #if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
 #endif
 
 /// Owns this device's handoff node, the LAN device list and the device being controlled.
@@ -17,18 +19,29 @@ public final class RemoteCoordinator {
     /// Set while this device is controlling another one ("controlling <device>" mode).
     public private(set) var controller: RemoteController?
     public private(set) var isTransferring = false
+    /// Name of the controlled device while its connection is being re-established.
+    public private(set) var reconnectingTo: String?
     public var lastError: String?
 
     @ObservationIgnored let host: PlayerRemoteHost
     @ObservationIgnored private let log = Logger(subsystem: "app.stereo", category: "remote")
+    @ObservationIgnored private var reconnectTask: Task<Void, Never>?
+    @ObservationIgnored private var lifecycleTask: Task<Void, Never>?
 
     init(player: PlayerController) {
         host = PlayerRemoteHost(player: player)
+        observeLifecycle()
     }
 
     public var devices: [DiscoveredDevice] { directory?.devices ?? [] }
-    public var isControllingRemote: Bool { controller?.connection == .connected }
+    /// True while reconnecting too, so commands aren't silently played on this device instead.
+    public var isControllingRemote: Bool { controller?.connection == .connected || reconnectingTo != nil }
     public var remoteState: RemoteState? { controller?.state }
+    /// "Living Room Mac", or "Reconnecting to Living Room Mac…" while the link is down.
+    public var controlledDeviceLabel: String {
+        if let reconnectingTo { return "Reconnecting to \(reconnectingTo)…" }
+        return controller?.device?.name ?? ""
+    }
 
     // MARK: Lifecycle
 
@@ -48,6 +61,7 @@ public final class RemoteCoordinator {
     }
 
     func stop() {
+        cancelReconnect()
         controller?.disconnect()
         controller = nil
         node?.stop()
@@ -63,18 +77,81 @@ public final class RemoteCoordinator {
         guard let node else { return }
         lastError = nil
         do {
+            cancelReconnect()
             controller?.disconnect()
             let c = try await node.connect(to: device)
-            c.subscribe()
-            controller = c
+            adopt(c, deviceID: device.id)
         } catch {
             lastError = error.localizedDescription
         }
     }
 
     public func stopControlling() {
+        cancelReconnect()
         controller?.disconnect()
         controller = nil
+    }
+
+    /// Makes `c` the controlled device and watches for it dropping.
+    private func adopt(_ c: RemoteController, deviceID: String) {
+        c.subscribe()
+        c.onLost = { [weak self] reason in self?.controllerLost(deviceID: deviceID, name: c.device?.name, reason: reason) }
+        controller = c
+    }
+
+    /// The controlled device went quiet (asleep, out of range, app quit). Keep trying for a while
+    /// before falling back to this device's own player.
+    private func controllerLost(deviceID: String, name: String?, reason: String?) {
+        guard let node else { return }
+        log.info("lost controlled device: \(reason ?? "closed")")
+        let label = name ?? "the other device"
+        reconnectingTo = label
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            let c = await node.reconnect { [weak self] in
+                self?.devices.first { $0.id == deviceID }?.endpoint
+            }
+            guard let self, !Task.isCancelled else { c?.disconnect(); return }
+            self.reconnectingTo = nil
+            self.reconnectTask = nil
+            if let c {
+                self.adopt(c, deviceID: deviceID)
+            } else {
+                self.controller = nil
+                self.lastError = "Lost connection to \(label)."
+            }
+        }
+    }
+
+    private func cancelReconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectingTo = nil
+    }
+
+    // MARK: App lifecycle
+
+    /// Listeners and browsers can die while iOS suspends the app or the Mac sleeps; nothing tells
+    /// the app, so check on the way back.
+    private func observeLifecycle() {
+        #if os(iOS) || os(tvOS)
+        let center = NotificationCenter.default
+        let name = UIApplication.willEnterForegroundNotification
+        #elseif os(macOS)
+        let center = NSWorkspace.shared.notificationCenter
+        let name = NSWorkspace.didWakeNotification
+        #endif
+        lifecycleTask = Task { [weak self] in
+            for await _ in center.notifications(named: name).map({ _ in () }) {
+                await self?.recover()
+            }
+        }
+    }
+
+    func recover() async {
+        guard let node else { return }
+        directory?.restart()
+        await node.ensureListening()
     }
 
     /// Moves what's playing here to `device`, then controls it.
@@ -85,10 +162,15 @@ public final class RemoteCoordinator {
         lastError = nil
         do {
             let c = try await node.connect(to: device)
-            try await c.handOff(from: host)
-            c.subscribe()
+            do {
+                try await c.handOff(from: host)
+            } catch {
+                c.disconnect()
+                throw error
+            }
+            cancelReconnect()
             controller?.disconnect()
-            controller = c
+            adopt(c, deviceID: device.id)
         } catch {
             lastError = error.localizedDescription
         }

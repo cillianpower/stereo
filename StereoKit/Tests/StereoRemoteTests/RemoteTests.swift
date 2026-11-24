@@ -89,6 +89,21 @@ private func eventually(_ timeout: Duration = .seconds(3), _ condition: () -> Bo
     return condition()
 }
 
+struct TimedOut: Error {}
+
+/// Runs `body`, failing with `TimedOut` instead of waiting forever.
+private func withTimeout<T: Sendable>(_ limit: Duration, _ body: @escaping @Sendable () async throws -> T) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await body() }
+        group.addTask {
+            try await Task.sleep(for: limit)
+            throw TimedOut()
+        }
+        defer { group.cancelAll() }
+        return try await group.next()!
+    }
+}
+
 private func loopback(_ port: UInt16) -> NWEndpoint { .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!) }
 
 @MainActor
@@ -154,7 +169,8 @@ private func makePair(hostPlaying: Bool = true, security: RemoteSecurity = .preS
 
 // MARK: Over loopback
 
-@Suite(.serialized) @MainActor struct RemoteLoopbackTests {
+// A network test that waits forever is worse than one that fails: one hung for 5 days once.
+@Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct RemoteLoopbackTests {
     @Test func handshakeWithPreSharedKey() async throws {
         let (server, _, client, port) = try await makePair()
         defer { server.stop() }
@@ -279,18 +295,122 @@ private func makePair(hostPlaying: Bool = true, security: RemoteSecurity = .preS
         let (server, _, _, port) = try await makePair(security: .insecureForTesting)
         defer { server.stop() }
         let raw = RemoteConnection(endpoint: loopback(port), security: .insecureForTesting)
+        defer { raw.close() }
         raw.start()
-        var iterator = raw.events.makeAsyncIterator()
-        guard case .ready = await iterator.next() else { Issue.record("not ready"); return }
-        let futureHello = DeviceInfo(id: "x", name: "Future", kind: .phone, account: "me", protocolVersion: 2)
-        raw.sendRaw(try Frame(.hello(futureHello), version: 2).encoded())
-
-        var refused = false
-        while let event = await iterator.next() {
-            if case .frame(.message(.error(.versionMismatch, _))) = event { refused = true }
-            if case .closed = event { break }
+        let future = remoteProtocolVersion + 1
+        let refused = try await withTimeout(.seconds(5)) {
+            var iterator = raw.events.makeAsyncIterator()
+            guard case .ready = await iterator.next() else { return false }
+            let futureHello = DeviceInfo(id: "x", name: "Future", kind: .phone, account: "me", protocolVersion: future)
+            raw.sendRaw(try Frame(.hello(futureHello), version: future).encoded())
+            var refused = false
+            while let event = await iterator.next() {
+                if case .frame(.message(.error(.versionMismatch, _))) = event { refused = true }
+                if case .closed = event { break }
+            }
+            return refused
         }
         #expect(refused)
+    }
+
+    // MARK: Liveness
+
+    @Test func silentPeerIsDropped() async throws {
+        let (server, _, _, port) = try await makePair(security: .insecureForTesting)
+        defer { server.stop() }
+        server.heartbeatInterval = .milliseconds(200)
+        server.idleTimeout = .seconds(1)
+        // Says hello, then never another word, like a phone that was suspended mid-session.
+        let raw = RemoteConnection(endpoint: loopback(port), security: .insecureForTesting)
+        defer { raw.close() }
+        raw.start()
+        let closed = try await withTimeout(.seconds(10)) {
+            var iterator = raw.events.makeAsyncIterator()
+            guard case .ready = await iterator.next() else { return false }
+            raw.send(.hello(device("Silent")))
+            while let event = await iterator.next() {
+                if case .closed = event { return true }
+            }
+            return true
+        }
+        #expect(closed)
+        #expect(await eventually { server.sessions.isEmpty })
+    }
+
+    @Test func heartbeatKeepsAnIdleConnectionOpen() async throws {
+        let (server, host, client, port) = try await makePair()
+        defer { server.stop() }
+        defer { withExtendedLifetime(host) {} }   // RemoteNode holds its host weakly
+        for node in [server, client] {
+            node.heartbeatInterval = .milliseconds(200)
+            node.idleTimeout = .seconds(1)
+        }
+        let controller = try await client.connect(to: loopback(port))
+        try await Task.sleep(for: .seconds(2.5))   // well past the idle timeout, with no commands
+        #expect(controller.connection == .connected)
+        #expect(server.sessions.count == 1)
+        try await controller.send(.play)
+    }
+
+    @Test func droppedConnectionIsReportedButDisconnectIsNot() async throws {
+        let (server, _, client, port) = try await makePair()
+        let mine = try await client.connect(to: loopback(port))
+        var mineLost = false
+        mine.onLost = { _ in mineLost = true }
+        mine.disconnect()
+
+        let other = try await client.connect(to: loopback(port))
+        var otherLost: String??
+        other.onLost = { otherLost = .some($0) }
+        server.stop()   // the device goes away
+        #expect(await eventually { otherLost != nil })
+        if case .disconnected = other.connection {} else { Issue.record("still \(other.connection)") }
+        #expect(!mineLost)
+    }
+
+    @Test func reconnectsWhenTheDeviceComesBack() async throws {
+        let (server, _, client, port) = try await makePair()
+        _ = try await client.connect(to: loopback(port))
+        server.stop()
+
+        // The device is unreachable for a while, then returns on the same port.
+        let returning = Task { @MainActor in
+            try await Task.sleep(for: .seconds(1))
+            let again = RemoteNode(device: device("Mac"), security: .preSharedKey(keyA), host: FakeHost(playing: true), advertise: false)
+            _ = try await again.start(port: port)
+            return again
+        }
+        var attempts = 0
+        let controller = await client.reconnect(limit: .seconds(10)) {
+            attempts += 1
+            return loopback(port)
+        }
+        let again = try await returning.value
+        defer { again.stop() }
+        #expect(controller?.connection == .connected)
+        #expect(controller?.device?.name == "Mac")
+        #expect(attempts > 1)
+    }
+
+    @Test func reconnectGivesUpAtItsLimit() async throws {
+        let (server, _, client, port) = try await makePair()
+        server.stop()
+        let start = ContinuousClock.now
+        let controller = await client.reconnect(limit: .seconds(1.5)) { loopback(port) }
+        #expect(controller == nil)
+        #expect(ContinuousClock.now - start < .seconds(8))
+    }
+
+    @Test func listenerCanBeRestarted() async throws {
+        let (server, _, client, port) = try await makePair()
+        defer { server.stop() }
+        server.stop()
+        try await Task.sleep(for: .milliseconds(100))   // let the old socket finish closing
+        #expect(server.port == nil)
+        await server.ensureListening()
+        #expect(server.port == port)   // same port, so saved endpoints keep working
+        let controller = try await client.connect(to: loopback(port))
+        #expect(controller.connection == .connected)
     }
 
     @Test func framerHandlesSplitAndMergedPackets() async throws {
@@ -373,7 +493,10 @@ final class FrameReader: @unchecked Sendable {
         var messages: [RemoteMessage] = []
         let deadline = ContinuousClock.now + .seconds(5)
         while !done(messages), ContinuousClock.now < deadline {
-            buffer.append(try await connection.receiveAsync())
+            // Bounded too: a peer that sends nothing must not stall the read past the deadline.
+            let remaining = deadline - ContinuousClock.now
+            guard remaining > .zero else { break }
+            buffer.append(try await withTimeout(remaining) { try await connection.receiveAsync() })
             while buffer.count >= 4 {
                 let b = [UInt8](buffer.prefix(4))
                 let length = Int(b[0]) << 24 | Int(b[1]) << 16 | Int(b[2]) << 8 | Int(b[3])

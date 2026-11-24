@@ -743,7 +743,7 @@ private struct MacPlayerBar: View {
                 HStack(spacing: 8) {
                     RemoteArtwork(item: state.item, cornerRadius: 0).frame(width: MacBarMetrics.height, height: MacBarMetrics.height).clipped()
                     Text(state.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    Text(controlled.controller?.device?.name ?? "").font(.system(size: 12)).foregroundStyle(.tint).lineLimit(1)
+                    Text(controlled.controlledDeviceLabel).font(.system(size: 12)).foregroundStyle(.tint).lineLimit(1)
                     Spacer(minLength: 0)
                 }
                 .contentShape(.rect)

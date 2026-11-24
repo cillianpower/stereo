@@ -31,9 +31,16 @@ final class RemotePeer {
     /// How long a prepared target waits for `transferCommit` before discarding.
     var commitTimeout: Duration = .seconds(10)
     var handshakeTimeout: Duration = .seconds(5)
+    /// How often we ping an open connection.
+    var heartbeatInterval: Duration = .seconds(2)
+    /// How long the peer may stay silent before we treat it as gone (Wi-Fi dropped, device asleep).
+    /// TCP keepalive alone takes about 10 minutes to notice with Darwin's defaults.
+    var idleTimeout: Duration = .seconds(8)
 
     private let log = Logger(subsystem: "app.stereo", category: "remote")
     private var eventTask: Task<Void, Never>?
+    private var heartbeatTask: Task<Void, Never>?
+    private var lastHeard = ContinuousClock.now
     private var subscriptionTask: Task<Void, Never>?
     private var lastSentState: RemoteState?
     private var openWaiters: [CheckedContinuation<DeviceInfo, Error>] = []
@@ -137,6 +144,7 @@ final class RemotePeer {
             phase = .handshaking
             connection.send(.hello(local))
         case .frame(.message(let message)):
+            lastHeard = .now
             handle(message)
         case .frame(.otherVersion(let v)):
             log.info("peer speaks protocol v\(v), we speak v\(remoteProtocolVersion)")
@@ -166,7 +174,7 @@ final class RemotePeer {
         }
 
         switch message {
-        case .hello, .error:
+        case .hello, .error, .ping:
             break
         case .subscribe:
             startSubscription()
@@ -232,10 +240,28 @@ final class RemotePeer {
             connection.send(.hello(local))
         }
         phase = .open
+        startHeartbeat()
         onOpen?(info)
         let waiters = openWaiters
         openWaiters = []
         for w in waiters { w.resume(returning: info) }
+    }
+
+    private func startHeartbeat() {
+        let interval = heartbeatInterval, timeout = idleTimeout
+        lastHeard = .now
+        heartbeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self, self.phase == .open else { return }
+                if ContinuousClock.now - self.lastHeard > timeout {
+                    self.log.info("peer silent for over \(timeout), closing")
+                    self.close(reason: "Lost connection")
+                    return
+                }
+                self.connection.send(.ping)
+            }
+        }
     }
 
     private func startSubscription() {
@@ -348,6 +374,7 @@ final class RemotePeer {
         if case .closed = phase { return }
         phase = .closed(reason)
         subscriptionTask?.cancel()
+        heartbeatTask?.cancel()
         eventTask?.cancel()
         for (_, task) in preparedTransfers { task.cancel() }
         if !preparedTransfers.isEmpty { host?.cancelTransfer() }
